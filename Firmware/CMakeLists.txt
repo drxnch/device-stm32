@@ -45,6 +45,9 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
+    Core/Src/ssd1306.c
+    Core/Src/ssd1306_tests.c
+    Core/Src/ssd1306_fonts.c
 )
 
 # Add include paths
