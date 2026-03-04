@@ -142,25 +142,25 @@ void ssd1306_TestFonts1() {
 
     #ifdef SSD1306_INCLUDE_FONT_16x26
     ssd1306_SetCursor(2, y);
-    ssd1306_WriteString("Font 16x26", Font_16x26, White);
+    ssd1306_WriteString("18:46", Font_16x26, White);
     y += 26;
     #endif
 
     #ifdef SSD1306_INCLUDE_FONT_11x18
     ssd1306_SetCursor(2, y);
-    ssd1306_WriteString("Font 11x18", Font_11x18, White);
+    ssd1306_WriteString("04/03/26", Font_11x18, White);
     y += 18;
     #endif
 
     #ifdef SSD1306_INCLUDE_FONT_7x10
     ssd1306_SetCursor(2, y);
-    ssd1306_WriteString("Font 7x10", Font_7x10, White);
+    ssd1306_WriteString("Thriller", Font_7x10, Black);
     y += 10;
     #endif
 
     #ifdef SSD1306_INCLUDE_FONT_6x8
     ssd1306_SetCursor(2, y);
-    ssd1306_WriteString("Font 6x8", Font_6x8, White);
+    ssd1306_WriteString("Michael Jackson", Font_6x8, Black);
     #endif
 
     ssd1306_UpdateScreen();
