@@ -50,7 +50,12 @@ I2C_HandleTypeDef hi2c1;
 
 UART_HandleTypeDef hlpuart1;
 
+SAI_HandleTypeDef hsai_BlockA1;
+DMA_HandleTypeDef hdma_sai1_a;
+
 SD_HandleTypeDef hsd1;
+DMA_HandleTypeDef hdma_sdmmc1_rx;
+DMA_HandleTypeDef hdma_sdmmc1_tx;
 
 TIM_HandleTypeDef htim1;
 
@@ -60,16 +65,27 @@ FIL MyFile;
 FRESULT res;   
 uint32_t byteswritten;
 char testData[] = "STM32 SDMMC + FATFS Working!";
+
+/* Audio Buffers */
+#define AUDIO_BUF_SIZE 4096 
+#define READBUF_SIZE 4096
+uint16_t audio_buffer[AUDIO_BUF_SIZE]; // The main buffer
+uint8_t playing = 0;                   // State flag
+UINT bytes_read;                       // To track SD card progress
+uint8_t readBuf[READBUF_SIZE]; // Buffer for encoded MP3 data
+int16_t outBuf[2 * 1152];      // Buffer for decoded PCM data
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 void PeriphCommonClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_LPUART1_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_SDMMC1_SD_Init(void);
+static void MX_SAI1_Init(void);
 void MX_USB_HOST_Process(void);
 
 /* USER CODE BEGIN PFP */
@@ -116,13 +132,14 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_LPUART1_UART_Init();
   MX_USB_HOST_Init();
   MX_TIM1_Init();
   MX_I2C1_Init();
   MX_SDMMC1_SD_Init();
   MX_FATFS_Init();
-  /* USER CODE BEGIN 2 */
+  MX_SAI1_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_Base_Start_IT(&htim1);
   ssd1306_Init();
@@ -132,32 +149,76 @@ int main(void)
   ssd1306_UpdateScreen();
 
   // 1. Mount SD Card
+  // res = f_mount(&MyFatFS, (TCHAR const*)SDPath, 1);
+  // if (res == FR_OK) {
+  //     // 2. Open/Create File
+  //     res = f_open(&MyFile, "L4_TEST.TXT", FA_CREATE_ALWAYS | FA_WRITE);
+  //     if (res == FR_OK) {
+  //         // 3. Write Data
+  //         res = f_write(&MyFile, testData, strlen(testData), (void *)&byteswritten);
+  //         f_close(&MyFile);
+          
+  //         if(res == FR_OK) {
+  //             ssd1306_SetCursor(2, 15);
+  //             ssd1306_WriteString("Write: SUCCESS", Font_7x10, White);
+  //         }
+  //     } else {
+  //         ssd1306_SetCursor(2, 15);
+  //         ssd1306_WriteString("File Open Error", Font_7x10, White);
+  //     }
+  // } else {
+  //     ssd1306_SetCursor(2, 15);
+  //     // If res is 3 (FR_NOT_READY), check your wiring!
+  //     char errBuf[20];
+  //     sprintf(errBuf, "Mount Err: %d", res);
+  //     ssd1306_WriteString(errBuf, Font_7x10, White);
+  // }
+
+  /* USER CODE BEGIN 2 */
+// Fill the buffer with a 440Hz Square Wave (Standard A4 note)
+// We alternate between a high value and a low value every 50 samples
+for(int i = 0; i < AUDIO_BUF_SIZE; i++) {
+    if ((i / 50) % 2 == 0) {
+        audio_buffer[i] = 2000;  // "High" part of the wave
+    } else {
+        audio_buffer[i] = -2000; // "Low" part of the wave
+    }
+}
+
+// Start the SAI - No SD card needed!
+HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer, AUDIO_BUF_SIZE);
+/* USER CODE END 2 */
+
+  // 1. Mount SD Card
   res = f_mount(&MyFatFS, (TCHAR const*)SDPath, 1);
   if (res == FR_OK) {
-      // 2. Open/Create File
-      res = f_open(&MyFile, "L4_TEST.TXT", FA_CREATE_ALWAYS | FA_WRITE);
+      // 2. Open the audio file - Ensure the name is music.wav on the SD card
+      res = f_open(&MyFile, "music.wav", FA_READ); 
+      
       if (res == FR_OK) {
-          // 3. Write Data
-          res = f_write(&MyFile, testData, strlen(testData), (void *)&byteswritten);
-          f_close(&MyFile);
+          // 3. Skip WAV header and pre-fill buffer
+          f_lseek(&MyFile, 44);
+          res = f_read(&MyFile, audio_buffer, AUDIO_BUF_SIZE * 2, &bytes_read);
           
-          if(res == FR_OK) {
-              ssd1306_SetCursor(2, 15);
-              ssd1306_WriteString("Write: SUCCESS", Font_7x10, White);
+          if (res == FR_OK && bytes_read > 0) {
+              ssd1306_SetCursor(2, 0);
+              ssd1306_WriteString("Playing Song...", Font_7x10, White);
+              ssd1306_UpdateScreen();
+
+              // 4. Start SAI DMA
+              HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer, AUDIO_BUF_SIZE);
+              playing = 1;
           }
       } else {
-          ssd1306_SetCursor(2, 15);
-          ssd1306_WriteString("File Open Error", Font_7x10, White);
+          char errorMsg[20];
+          sprintf(errorMsg, "Open Err: %d", res); // res 4 = File Not Found
+          ssd1306_SetCursor(2, 30);
+          ssd1306_WriteString(errorMsg, Font_7x10, White);
+          ssd1306_UpdateScreen();
       }
-  } else {
-      ssd1306_SetCursor(2, 15);
-      // If res is 3 (FR_NOT_READY), check your wiring!
-      char errBuf[20];
-      sprintf(errBuf, "Mount Err: %d", res);
-      ssd1306_WriteString(errBuf, Font_7x10, White);
   }
   
-  ssd1306_UpdateScreen();
+  //ssd1306_UpdateScreen();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -244,7 +305,9 @@ void PeriphCommonClock_Config(void)
 
   /** Initializes the peripherals clock
   */
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USB|RCC_PERIPHCLK_SDMMC1;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_SAI1|RCC_PERIPHCLK_USB
+                              |RCC_PERIPHCLK_SDMMC1;
+  PeriphClkInit.Sai1ClockSelection = RCC_SAI1CLKSOURCE_PLLSAI1;
   PeriphClkInit.UsbClockSelection = RCC_USBCLKSOURCE_PLLSAI1;
   PeriphClkInit.Sdmmc1ClockSelection = RCC_SDMMC1CLKSOURCE_PLLSAI1;
   PeriphClkInit.PLLSAI1.PLLSAI1Source = RCC_PLLSOURCE_MSI;
@@ -253,7 +316,7 @@ void PeriphCommonClock_Config(void)
   PeriphClkInit.PLLSAI1.PLLSAI1P = RCC_PLLP_DIV2;
   PeriphClkInit.PLLSAI1.PLLSAI1Q = RCC_PLLQ_DIV2;
   PeriphClkInit.PLLSAI1.PLLSAI1R = RCC_PLLR_DIV2;
-  PeriphClkInit.PLLSAI1.PLLSAI1ClockOut = RCC_PLLSAI1_48M2CLK;
+  PeriphClkInit.PLLSAI1.PLLSAI1ClockOut = RCC_PLLSAI1_SAI1CLK|RCC_PLLSAI1_48M2CLK;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
@@ -343,6 +406,42 @@ static void MX_LPUART1_UART_Init(void)
 }
 
 /**
+  * @brief SAI1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SAI1_Init(void)
+{
+
+  /* USER CODE BEGIN SAI1_Init 0 */
+
+  /* USER CODE END SAI1_Init 0 */
+
+  /* USER CODE BEGIN SAI1_Init 1 */
+
+  /* USER CODE END SAI1_Init 1 */
+  hsai_BlockA1.Instance = SAI1_Block_A;
+  hsai_BlockA1.Init.AudioMode = SAI_MODEMASTER_TX;
+  hsai_BlockA1.Init.Synchro = SAI_ASYNCHRONOUS;
+  hsai_BlockA1.Init.OutputDrive = SAI_OUTPUTDRIVE_DISABLE;
+  hsai_BlockA1.Init.NoDivider = SAI_MASTERDIVIDER_ENABLE;
+  hsai_BlockA1.Init.FIFOThreshold = SAI_FIFOTHRESHOLD_EMPTY;
+  hsai_BlockA1.Init.AudioFrequency = SAI_AUDIO_FREQUENCY_44K;
+  hsai_BlockA1.Init.SynchroExt = SAI_SYNCEXT_DISABLE;
+  hsai_BlockA1.Init.MonoStereoMode = SAI_STEREOMODE;
+  hsai_BlockA1.Init.CompandingMode = SAI_NOCOMPANDING;
+  hsai_BlockA1.Init.TriState = SAI_OUTPUT_NOTRELEASED;
+  if (HAL_SAI_InitProtocol(&hsai_BlockA1, SAI_I2S_STANDARD, SAI_PROTOCOL_DATASIZE_16BIT, 2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SAI1_Init 2 */
+
+  /* USER CODE END SAI1_Init 2 */
+
+}
+
+/**
   * @brief SDMMC1 Initialization Function
   * @param None
   * @retval None
@@ -363,7 +462,7 @@ static void MX_SDMMC1_SD_Init(void)
   hsd1.Init.ClockPowerSave = SDMMC_CLOCK_POWER_SAVE_DISABLE;
   hsd1.Init.BusWide = SDMMC_BUS_WIDE_1B;
   hsd1.Init.HardwareFlowControl = SDMMC_HARDWARE_FLOW_CONTROL_DISABLE;
-  hsd1.Init.ClockDiv = 255; // Changed to 255 from 1 and this worked somehow
+  hsd1.Init.ClockDiv = 16;
   /* USER CODE BEGIN SDMMC1_Init 2 */
 
   /* USER CODE END SDMMC1_Init 2 */
@@ -418,6 +517,28 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA2_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA2_Channel1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Channel1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Channel1_IRQn);
+  /* DMA2_Channel4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Channel4_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Channel4_IRQn);
+  /* DMA2_Channel5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Channel5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Channel5_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -430,6 +551,7 @@ static void MX_GPIO_Init(void)
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
@@ -476,7 +598,24 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+/* This fills the FIRST half (Index 0 to BUF_SIZE/2 - 1) */
+void HAL_SAI_TxHalfCpltCallback(SAI_HandleTypeDef *hsai) {
+    // We read (Half the samples) * (2 bytes per sample)
+    f_read(&MyFile, &audio_buffer[0], AUDIO_BUF_SIZE, &bytes_read);
+}
 
+/* This fills the SECOND half (Index BUF_SIZE/2 to BUF_SIZE - 1) */
+void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai) {
+    // We read starting at the middle index
+    f_read(&MyFile, &audio_buffer[AUDIO_BUF_SIZE/2], AUDIO_BUF_SIZE, &bytes_read);
+    
+    // Check if the amount read is less than a half-buffer
+    if (bytes_read < AUDIO_BUF_SIZE) {
+        HAL_SAI_DMAStop(&hsai_BlockA1);
+        f_close(&MyFile);
+        playing = 0;
+    }
+}
 /* USER CODE END 4 */
 
 /**

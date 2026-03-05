@@ -22,6 +22,9 @@
 /* USER CODE BEGIN Includes */
 
 /* USER CODE END Includes */
+extern DMA_HandleTypeDef hdma_sdmmc1_rx;
+
+extern DMA_HandleTypeDef hdma_sdmmc1_tx;
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN TD */
@@ -270,6 +273,41 @@ void HAL_SD_MspInit(SD_HandleTypeDef* hsd)
     GPIO_InitStruct.Alternate = GPIO_AF12_SDMMC1;
     HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
+    /* SDMMC1 DMA Init */
+    /* SDMMC1_RX Init */
+    hdma_sdmmc1_rx.Instance = DMA2_Channel4;
+    hdma_sdmmc1_rx.Init.Request = DMA_REQUEST_7;
+    hdma_sdmmc1_rx.Init.Direction = DMA_PERIPH_TO_MEMORY;
+    hdma_sdmmc1_rx.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_sdmmc1_rx.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_sdmmc1_rx.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+    hdma_sdmmc1_rx.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
+    hdma_sdmmc1_rx.Init.Mode = DMA_NORMAL;
+    hdma_sdmmc1_rx.Init.Priority = DMA_PRIORITY_LOW;
+    if (HAL_DMA_Init(&hdma_sdmmc1_rx) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    __HAL_LINKDMA(hsd,hdmarx,hdma_sdmmc1_rx);
+
+    /* SDMMC1_TX Init */
+    hdma_sdmmc1_tx.Instance = DMA2_Channel5;
+    hdma_sdmmc1_tx.Init.Request = DMA_REQUEST_7;
+    hdma_sdmmc1_tx.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    hdma_sdmmc1_tx.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_sdmmc1_tx.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_sdmmc1_tx.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+    hdma_sdmmc1_tx.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
+    hdma_sdmmc1_tx.Init.Mode = DMA_NORMAL;
+    hdma_sdmmc1_tx.Init.Priority = DMA_PRIORITY_LOW;
+    if (HAL_DMA_Init(&hdma_sdmmc1_tx) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    __HAL_LINKDMA(hsd,hdmatx,hdma_sdmmc1_tx);
+
     /* USER CODE BEGIN SDMMC1_MspInit 1 */
 
     /* USER CODE END SDMMC1_MspInit 1 */
@@ -303,6 +341,9 @@ void HAL_SD_MspDeInit(SD_HandleTypeDef* hsd)
 
     HAL_GPIO_DeInit(GPIOD, GPIO_PIN_2);
 
+    /* SDMMC1 DMA DeInit */
+    HAL_DMA_DeInit(hsd->hdmarx);
+    HAL_DMA_DeInit(hsd->hdmatx);
     /* USER CODE BEGIN SDMMC1_MspDeInit 1 */
 
     /* USER CODE END SDMMC1_MspDeInit 1 */
@@ -359,6 +400,86 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* htim_base)
     /* USER CODE END TIM1_MspDeInit 1 */
   }
 
+}
+
+extern DMA_HandleTypeDef hdma_sai1_a;
+
+static uint32_t SAI1_client =0;
+
+void HAL_SAI_MspInit(SAI_HandleTypeDef* hsai)
+{
+
+  GPIO_InitTypeDef GPIO_InitStruct;
+/* SAI1 */
+    if(hsai->Instance==SAI1_Block_A)
+    {
+    /* Peripheral clock enable */
+    if (SAI1_client == 0)
+    {
+       __HAL_RCC_SAI1_CLK_ENABLE();
+    }
+    SAI1_client ++;
+
+    /**SAI1_A_Block_A GPIO Configuration
+    PE4     ------> SAI1_FS_A
+    PE5     ------> SAI1_SCK_A
+    PE6     ------> SAI1_SD_A
+    */
+    GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Alternate = GPIO_AF13_SAI1;
+    HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+      /* Peripheral DMA init*/
+
+    hdma_sai1_a.Instance = DMA2_Channel1;
+    hdma_sai1_a.Init.Request = DMA_REQUEST_1;
+    hdma_sai1_a.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    hdma_sai1_a.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_sai1_a.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_sai1_a.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
+    hdma_sai1_a.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
+    hdma_sai1_a.Init.Mode = DMA_CIRCULAR;
+    hdma_sai1_a.Init.Priority = DMA_PRIORITY_LOW;
+    if (HAL_DMA_Init(&hdma_sai1_a) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    /* Several peripheral DMA handle pointers point to the same DMA handle.
+     Be aware that there is only one channel to perform all the requested DMAs. */
+    __HAL_LINKDMA(hsai,hdmarx,hdma_sai1_a);
+
+    __HAL_LINKDMA(hsai,hdmatx,hdma_sai1_a);
+
+    }
+}
+
+void HAL_SAI_MspDeInit(SAI_HandleTypeDef* hsai)
+{
+/* SAI1 */
+    if(hsai->Instance==SAI1_Block_A)
+    {
+    SAI1_client --;
+    if (SAI1_client == 0)
+      {
+      /* Peripheral clock disable */
+       __HAL_RCC_SAI1_CLK_DISABLE();
+      }
+
+    /**SAI1_A_Block_A GPIO Configuration
+    PE4     ------> SAI1_FS_A
+    PE5     ------> SAI1_SCK_A
+    PE6     ------> SAI1_SD_A
+    */
+    HAL_GPIO_DeInit(GPIOE, GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6);
+
+    /* SAI1 DMA Deinit */
+    HAL_DMA_DeInit(hsai->hdmarx);
+    HAL_DMA_DeInit(hsai->hdmatx);
+    }
 }
 
 /* USER CODE BEGIN 1 */
