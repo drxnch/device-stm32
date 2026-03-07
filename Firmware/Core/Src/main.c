@@ -26,6 +26,7 @@
 #include "ssd1306.h"
 #include "ssd1306_tests.h"
 #include "ssd1306_fonts.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 /* USER CODE END Includes */
@@ -46,6 +47,9 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+ADC_HandleTypeDef hadc1;
+DMA_HandleTypeDef hdma_adc1;
+
 I2C_HandleTypeDef hi2c1;
 
 UART_HandleTypeDef hlpuart1;
@@ -60,13 +64,25 @@ DMA_HandleTypeDef hdma_sdmmc1_tx;
 TIM_HandleTypeDef htim1;
 
 /* USER CODE BEGIN PV */
+/*
+  _____  _____  _______      __       _______ ______   __      __     _____  _____          ____  _      ______  _____ 
+ |  __ \|  __ \|_   _\ \    / /   /\ |__   __|  ____|  \ \    / /\   |  __ \|_   _|   /\   |  _ \| |    |  ____|/ ____|
+ | |__) | |__) | | |  \ \  / /   /  \   | |  | |__      \ \  / /  \  | |__) | | |    /  \  | |_) | |    | |__  | (___   
+ |  ___/|  _  /  | |   \ \/ /   / /\ \  | |  |  __|      \ \/ / /\ \ |  _  /  | |   / /\ \ |  _ <| |    |  __|  \___ \  
+ | |    | | \ \ _| |_   \  /   / ____ \ | |  | |____      \  / ____ \| | \ \ _| |_ / ____ \| |_) | |____| |____ ____) | 
+ |_|    |_|  \_\_____|   \/   /_/    \_\|_|  |______|      \/_/    \_\_|  \_\_____/_/    \_\____/|______|______|_____/ 
+                                                     
+                                                                  
+*/
+
+// SDMMC
 FATFS MyFatFS; 
 FIL MyFile;    
 FRESULT res;   
 uint32_t byteswritten;
 char testData[] = "STM32 SDMMC + FATFS Working!";
 
-/* Audio Buffers */
+// Audio
 #define AUDIO_BUF_SIZE 4096 
 #define READBUF_SIZE 4096
 uint16_t audio_buffer[AUDIO_BUF_SIZE]; // The main buffer
@@ -74,6 +90,15 @@ uint8_t playing = 0;                   // State flag
 UINT bytes_read;                       // To track SD card progress
 uint8_t readBuf[READBUF_SIZE]; // Buffer for encoded MP3 data
 int16_t outBuf[2 * 1152];      // Buffer for decoded PCM data
+uint32_t adc_buffer[1];
+uint8_t timer_ready = 0;
+uint8_t last_button_state = 0; 
+
+// Display
+
+// Miscellaneous (Buttons, Sensors, States etc.)
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -86,6 +111,7 @@ static void MX_TIM1_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_SDMMC1_SD_Init(void);
 static void MX_SAI1_Init(void);
+static void MX_ADC1_Init(void);
 void MX_USB_HOST_Process(void);
 
 /* USER CODE BEGIN PFP */
@@ -93,9 +119,19 @@ void MX_USB_HOST_Process(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/*
+  _____  _____  _______      __       _______ ______   _    _  _____ ______ _____     _____  ____  _____  ______  
+ |  __ \|  __ \|_   _\ \    / /   /\ |__   __|  ____| | |  | |/ ____|  ____|  __ \   / ____|/ __ \|  __ \|  ____| 
+ | |__) | |__) | | |  \ \  / /   /  \   | |  | |__    | |  | | (___ | |__  | |__) | | |    | |  | | |  | | |__   
+ |  ___/|  _  /  | |   \ \/ /   / /\ \  | |  |  __|   | |  | |\___ \|  __| |  _  /  | |    | |  | | |  | |  __|  
+ | |    | | \ \ _| |_   \  /   / ____ \ | |  | |____  | |__| |____) | |____| | \ \  | |____| |__| | |__| | |____ 
+ |_|    |_|  \_\_____|   \/   /_/    \_\|_|  |______|  \____/|_____/|______|_|  \_\  \_____|\____/|_____/|______|
+                                                                                   
+                              
+*/
 
-/* USER CODE BEGIN 0 */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
+  timer_ready = 1;
 	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
 }
 /* USER CODE END 0 */
@@ -117,7 +153,6 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -140,7 +175,19 @@ int main(void)
   MX_SDMMC1_SD_Init();
   MX_FATFS_Init();
   MX_SAI1_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
+
+/*
+  _____ _   _ _____ _______ _____          _      _____  _____         _______  _____  ____  _   _  _____ 
+ |_   _| \ | |_   _|__   __|_   _|   /\   | |    |_   _|/ ____|  / \  |__    __|_   _|/ __ \| \ | |/ ____|
+   | | |  \| | | |    | |    | |    /  \  | |      | | | (___   /   \    |  |    | | | |  | |  \| | (___  
+   | | | . ` | | |    | |    | |   / /\ \ | |      | |  \___ \ /  /\ \   |  |    | | | |  | | . ` |\___ \ 
+  _| |_| |\  |_| |_   | |   _| |_ / ____ \| |____ _| |_ ____) /  ____ \  |  |   _| |_| |__| | |\  |____) |
+ |_____|_| \_|_____|  |_|  |_____/_/    \_\______|_____|_____/_/     \ \_|__|  |_____|\____/|_| \_|_____/ 
+                                                                                                       
+*/
+
   HAL_TIM_Base_Start_IT(&htim1);
   ssd1306_Init();
   ssd1306_Fill(Black);
@@ -175,58 +222,68 @@ int main(void)
   // }
 
   /* USER CODE BEGIN 2 */
-// Fill the buffer with a 440Hz Square Wave (Standard A4 note)
-// We alternate between a high value and a low value every 50 samples
-for(int i = 0; i < AUDIO_BUF_SIZE; i++) {
-    if ((i / 50) % 2 == 0) {
-        audio_buffer[i] = 2000;  // "High" part of the wave
-    } else {
-        audio_buffer[i] = -2000; // "Low" part of the wave
-    }
-}
-
-// Start the SAI - No SD card needed!
-HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer, AUDIO_BUF_SIZE);
-/* USER CODE END 2 */
-
   // 1. Mount SD Card
-  res = f_mount(&MyFatFS, (TCHAR const*)SDPath, 1);
+  res = f_mount(&MyFatFS, (TCHAR const *)SDPath, 1);
   if (res == FR_OK) {
-      // 2. Open the audio file - Ensure the name is music.wav on the SD card
-      res = f_open(&MyFile, "music.wav", FA_READ); 
-      
-      if (res == FR_OK) {
-          // 3. Skip WAV header and pre-fill buffer
-          f_lseek(&MyFile, 44);
-          res = f_read(&MyFile, audio_buffer, AUDIO_BUF_SIZE * 2, &bytes_read);
-          
-          if (res == FR_OK && bytes_read > 0) {
-              ssd1306_SetCursor(2, 0);
-              ssd1306_WriteString("Playing Song...", Font_7x10, White);
-              ssd1306_UpdateScreen();
-
-              // 4. Start SAI DMA
-              HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer, AUDIO_BUF_SIZE);
-              playing = 1;
-          }
-      } else {
-          char errorMsg[20];
-          sprintf(errorMsg, "Open Err: %d", res); // res 4 = File Not Found
-          ssd1306_SetCursor(2, 30);
-          ssd1306_WriteString(errorMsg, Font_7x10, White);
-          ssd1306_UpdateScreen();
+    // 2. Open the audio file
+    res = f_open(&MyFile, "music.wav", FA_READ);
+    if (res == FR_OK) {
+      // 3. Skip WAV header (44 bytes)
+      f_lseek(&MyFile, 44);
+      // 4. Initial Buffer Fill (Read bytes, but fill half the samples)
+      // We read AUDIO_BUF_SIZE * 2 because each sample is 2 bytes (uint16_t)
+      res = f_read(&MyFile, audio_buffer, AUDIO_BUF_SIZE * 2, &bytes_read);
+      if (res == FR_OK && bytes_read > 0) {
+        ssd1306_SetCursor(2, 0);
+        ssd1306_WriteString("Playing Music...", Font_7x10, White);
+        ssd1306_UpdateScreen();
+        // 5. Start SAI DMA (SAI expects number of samples, not bytes)
+        HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer,
+                             AUDIO_BUF_SIZE);
+        playing = 1;
       }
+    } else {
+      // Show error if file not found
+      char errBuf[20];
+      sprintf(errBuf, "Open Error: %d", res);
+      ssd1306_SetCursor(2, 30);
+      ssd1306_WriteString(errBuf, Font_7x10, White);
+      ssd1306_UpdateScreen();
+    }
   }
-  
-  //ssd1306_UpdateScreen();
-  /* USER CODE END 2 */
-
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-    //ssd1306_TestFonts1();
-    HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin,GPIO_PIN_SET);
+  /*
+ __          _   _    _ _____ _      ______   _      ____   ____  _____  
+ \ \        / / | |  | |_   _| |    |  ____| | |    / __ \ / __ \|  __ \ 
+  \ \  /\  / /  | |__| | | | | |    | |__    | |   | |  | | |  | | |__) |
+   \ \/  \/ /   |  __  | | | | |    |  __|   | |   | |  | | |  | |  ___/ 
+    \  /\  /    | |  | |_| |_| |____| |____  | |___| |__| | |__| | |     
+     \/  \/     |_|  |_|_____|______|______| |______\____/ \____/|_|     
+                                                                       
+*/
+  while (1) {
+    uint8_t current_button_state = HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_8);
+    if (current_button_state != last_button_state) {
+      // Something changed!
+      if (current_button_state == GPIO_PIN_SET) {
+        // Just pressed
+        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+        ssd1306_SetCursor(60, 35);
+        ssd1306_WriteString("Button", Font_7x10, White);
+      } else {
+        // Just released
+        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+        // Clear ONLY the area where "Button" was (e.g., 60x10 pixels)
+        ssd1306_FillRectangle(60, 35, 110, 45, Black);
+      }
+
+      // Push the changes to the screen ONCE per change
+      ssd1306_UpdateScreen();
+
+      // Save the state for the next loop
+      last_button_state = current_button_state;
+    }
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
 
@@ -306,8 +363,9 @@ void PeriphCommonClock_Config(void)
   /** Initializes the peripherals clock
   */
   PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_SAI1|RCC_PERIPHCLK_USB
-                              |RCC_PERIPHCLK_SDMMC1;
+                              |RCC_PERIPHCLK_SDMMC1|RCC_PERIPHCLK_ADC;
   PeriphClkInit.Sai1ClockSelection = RCC_SAI1CLKSOURCE_PLLSAI1;
+  PeriphClkInit.AdcClockSelection = RCC_ADCCLKSOURCE_PLLSAI1;
   PeriphClkInit.UsbClockSelection = RCC_USBCLKSOURCE_PLLSAI1;
   PeriphClkInit.Sdmmc1ClockSelection = RCC_SDMMC1CLKSOURCE_PLLSAI1;
   PeriphClkInit.PLLSAI1.PLLSAI1Source = RCC_PLLSOURCE_MSI;
@@ -316,11 +374,79 @@ void PeriphCommonClock_Config(void)
   PeriphClkInit.PLLSAI1.PLLSAI1P = RCC_PLLP_DIV2;
   PeriphClkInit.PLLSAI1.PLLSAI1Q = RCC_PLLQ_DIV2;
   PeriphClkInit.PLLSAI1.PLLSAI1R = RCC_PLLR_DIV2;
-  PeriphClkInit.PLLSAI1.PLLSAI1ClockOut = RCC_PLLSAI1_SAI1CLK|RCC_PLLSAI1_48M2CLK;
+  PeriphClkInit.PLLSAI1.PLLSAI1ClockOut = RCC_PLLSAI1_SAI1CLK|RCC_PLLSAI1_48M2CLK
+                              |RCC_PLLSAI1_ADC1CLK;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief ADC1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC1_Init(void)
+{
+
+  /* USER CODE BEGIN ADC1_Init 0 */
+
+  /* USER CODE END ADC1_Init 0 */
+
+  ADC_MultiModeTypeDef multimode = {0};
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC1_Init 1 */
+
+  /* USER CODE END ADC1_Init 1 */
+
+  /** Common config
+  */
+  hadc1.Instance = ADC1;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
+  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.LowPowerAutoWait = DISABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.DiscontinuousConvMode = DISABLE;
+  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc1.Init.DMAContinuousRequests = DISABLE;
+  hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+  hadc1.Init.OversamplingMode = DISABLE;
+  if (HAL_ADC_Init(&hadc1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure the ADC multi-mode
+  */
+  multimode.Mode = ADC_MODE_INDEPENDENT;
+  if (HAL_ADCEx_MultiModeConfigChannel(&hadc1, &multimode) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_1;
+  sConfig.Rank = ADC_REGULAR_RANK_1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
+  sConfig.SingleDiff = ADC_SINGLE_ENDED;
+  sConfig.OffsetNumber = ADC_OFFSET_NONE;
+  sConfig.Offset = 0;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC1_Init 2 */
+
+  /* USER CODE END ADC1_Init 2 */
+
 }
 
 /**
@@ -524,8 +650,12 @@ static void MX_DMA_Init(void)
 
   /* DMA controller clock enable */
   __HAL_RCC_DMA2_CLK_ENABLE();
+  __HAL_RCC_DMA1_CLK_ENABLE();
 
   /* DMA interrupt init */
+  /* DMA1_Channel1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
   /* DMA2_Channel1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Channel1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA2_Channel1_IRQn);
@@ -554,6 +684,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
+  __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOG_CLK_ENABLE();
   HAL_PWREx_EnableVddIO2();
@@ -571,6 +702,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PF12 */
+  GPIO_InitStruct.Pin = GPIO_PIN_12;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LD3_Pin LD2_Pin */
   GPIO_InitStruct.Pin = LD3_Pin|LD2_Pin;
