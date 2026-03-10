@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "fatfs.h"
+#include "stm32l4xx_hal_gpio.h"
 #include "usb_host.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -26,14 +27,21 @@
 #include "ssd1306.h"
 #include "ssd1306_tests.h"
 #include "ssd1306_fonts.h"
+#include "display.h"
+
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+typedef struct {
+  void (*draw)(void);
+  uint8_t input;
+  uint8_t parent_id;  
+} display;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -43,6 +51,23 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
+#define HOME_STATE 0
+#define MUSIC_STATE 1
+#define TIMER_STATE 2
+#define ALARM_STATE 3
+#define TIMER_PRESET_STATE 4
+#define SET_TIMER_STATE 5
+#define MUSIC_PLAYLIST_STATE 6
+#define MUSIC_ALBUM_STATE 7
+#define MUSIC_ALLSONGS_STATE 8
+#define ALARM_PRESET_STATE 9
+#define ALARM_SET_STATE 10
+
+
+
+#define DOWN_PRESSED (HAL_GPIO_ReadPin(TEMP_DOWN_GPIO_Port, TEMP_DOWN_Pin) == GPIO_PIN_SET)
+#define UP_PRESSED   (HAL_GPIO_ReadPin(TEMP_UP_GPIO_Port, TEMP_UP_Pin) == GPIO_PIN_SET)
+#define BUTTON_PRESSED 1
 
 /* USER CODE END PM */
 
@@ -75,12 +100,22 @@ TIM_HandleTypeDef htim1;
                                                                   
 */
 
+//Initialisation Code
+uint8_t rtc_time=0;
+uint8_t battery_percentage = 0;
+char song_name[18]; //Change if font size changes
+char artist[18]; // Change if font size changes
+char test_song[9]="music.wav";
+uint8_t current_state = HOME_STATE;
+uint8_t next_state = 0;
+bool down_button_last = false;
+
+
 // SDMMC
 FATFS MyFatFS; 
 FIL MyFile;    
 FRESULT res;   
 uint32_t byteswritten;
-char testData[] = "STM32 SDMMC + FATFS Working!";
 
 // Audio
 #define AUDIO_BUF_SIZE 4096 
@@ -115,6 +150,7 @@ static void MX_ADC1_Init(void);
 void MX_USB_HOST_Process(void);
 
 /* USER CODE BEGIN PFP */
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -133,6 +169,35 @@ void MX_USB_HOST_Process(void);
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
   timer_ready = 1;
 	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
+
+}
+
+void PlaySong(char song[9]) {
+    res = f_mount(&MyFatFS, (TCHAR const *)SDPath, 1);
+  if (res == FR_OK) {
+    // 2. Open the audio file
+    res = f_open(&MyFile, song, FA_READ);
+    if (res == FR_OK) {
+      // 3. Skip WAV header (44 bytes)
+      f_lseek(&MyFile, 44);
+      // 4. Initial Buffer Fill (Read bytes, but fill half the samples)
+      // We read AUDIO_BUF_SIZE * 2 because each sample is 2 bytes (uint16_t)
+      res = f_read(&MyFile, audio_buffer, AUDIO_BUF_SIZE * 2, &bytes_read);
+      if (res == FR_OK && bytes_read > 0) {
+        // 5. Start SAI DMA (SAI expects number of samples, not bytes)
+        HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer,
+                             AUDIO_BUF_SIZE);
+        playing = 1;
+      }
+    } else {
+      // Show error if file not found
+      char errBuf[20];
+      sprintf(errBuf, "Open Error: %d", res);
+      ssd1306_SetCursor(2, 30);
+      ssd1306_WriteString(errBuf, Font_7x10, White);
+      ssd1306_UpdateScreen();
+    }
+  }
 }
 /* USER CODE END 0 */
 
@@ -153,6 +218,7 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
+
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -187,70 +253,16 @@ int main(void)
  |_____|_| \_|_____|  |_|  |_____/_/    \_\______|_____|_____/_/     \ \_|__|  |_____|\____/|_| \_|_____/ 
                                                                                                        
 */
-
+  
+// Initialisations
   HAL_TIM_Base_Start_IT(&htim1);
   ssd1306_Init();
-  ssd1306_Fill(Black);
-  ssd1306_SetCursor(2, 0);
-  ssd1306_WriteString("SD Card Test...", Font_7x10, White);
-  ssd1306_UpdateScreen();
 
-  // 1. Mount SD Card
-  // res = f_mount(&MyFatFS, (TCHAR const*)SDPath, 1);
-  // if (res == FR_OK) {
-  //     // 2. Open/Create File
-  //     res = f_open(&MyFile, "L4_TEST.TXT", FA_CREATE_ALWAYS | FA_WRITE);
-  //     if (res == FR_OK) {
-  //         // 3. Write Data
-  //         res = f_write(&MyFile, testData, strlen(testData), (void *)&byteswritten);
-  //         f_close(&MyFile);
-          
-  //         if(res == FR_OK) {
-  //             ssd1306_SetCursor(2, 15);
-  //             ssd1306_WriteString("Write: SUCCESS", Font_7x10, White);
-  //         }
-  //     } else {
-  //         ssd1306_SetCursor(2, 15);
-  //         ssd1306_WriteString("File Open Error", Font_7x10, White);
-  //     }
-  // } else {
-  //     ssd1306_SetCursor(2, 15);
-  //     // If res is 3 (FR_NOT_READY), check your wiring!
-  //     char errBuf[20];
-  //     sprintf(errBuf, "Mount Err: %d", res);
-  //     ssd1306_WriteString(errBuf, Font_7x10, White);
-  // }
+  // Display Initialisation
+  DrawHomePage();
+  // PlaySong(test_song);
+  /* USER CODE END 2 */
 
-  /* USER CODE BEGIN 2 */
-  // 1. Mount SD Card
-  res = f_mount(&MyFatFS, (TCHAR const *)SDPath, 1);
-  if (res == FR_OK) {
-    // 2. Open the audio file
-    res = f_open(&MyFile, "music.wav", FA_READ);
-    if (res == FR_OK) {
-      // 3. Skip WAV header (44 bytes)
-      f_lseek(&MyFile, 44);
-      // 4. Initial Buffer Fill (Read bytes, but fill half the samples)
-      // We read AUDIO_BUF_SIZE * 2 because each sample is 2 bytes (uint16_t)
-      res = f_read(&MyFile, audio_buffer, AUDIO_BUF_SIZE * 2, &bytes_read);
-      if (res == FR_OK && bytes_read > 0) {
-        ssd1306_SetCursor(2, 0);
-        ssd1306_WriteString("Playing Music...", Font_7x10, White);
-        ssd1306_UpdateScreen();
-        // 5. Start SAI DMA (SAI expects number of samples, not bytes)
-        HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer,
-                             AUDIO_BUF_SIZE);
-        playing = 1;
-      }
-    } else {
-      // Show error if file not found
-      char errBuf[20];
-      sprintf(errBuf, "Open Error: %d", res);
-      ssd1306_SetCursor(2, 30);
-      ssd1306_WriteString(errBuf, Font_7x10, White);
-      ssd1306_UpdateScreen();
-    }
-  }
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   /*
@@ -263,27 +275,36 @@ int main(void)
                                                                        
 */
   while (1) {
-    uint8_t current_button_state = HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_8);
-    if (current_button_state != last_button_state) {
-      // Something changed!
-      if (current_button_state == GPIO_PIN_SET) {
-        // Just pressed
-        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
-        ssd1306_SetCursor(60, 35);
-        ssd1306_WriteString("Button", Font_7x10, White);
-      } else {
-        // Just released
-        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
-        // Clear ONLY the area where "Button" was (e.g., 60x10 pixels)
-        ssd1306_FillRectangle(60, 35, 110, 45, Black);
-      }
+    bool down_button_current = DOWN_PRESSED;
 
-      // Push the changes to the screen ONCE per change
-      ssd1306_UpdateScreen();
-
-      // Save the state for the next loop
-      last_button_state = current_button_state;
+// Only trigger ONCE when the button is first pushed down
+if (down_button_current && !down_button_last) {
+    switch (current_state) {
+        case HOME_STATE:   next_state = MUSIC_STATE; break;
+        case MUSIC_STATE:  next_state = TIMER_STATE; break;
+        case TIMER_STATE:  next_state = ALARM_STATE; break;
+        case ALARM_STATE:  next_state = HOME_STATE;  break;
     }
+}
+down_button_last = down_button_current; // Save for next loop
+
+// Only Redraw if the state actually changed to save I2C bandwidth
+if (current_state != next_state) {
+    current_state = next_state;
+    switch (current_state) {
+        case HOME_STATE:  DrawHomePage(); break;
+        case MUSIC_STATE: DrawMusicPlayerIcon(); break;
+        case TIMER_STATE: DrawTimerIcon(); break;
+        case ALARM_STATE: DrawAlarmIcon(); break;
+    }
+}
+
+    if (DOWN_PRESSED) {
+      HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+    }
+    else HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+
+
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
 
@@ -506,7 +527,6 @@ static void MX_LPUART1_UART_Init(void)
 {
 
   /* USER CODE BEGIN LPUART1_Init 0 */
-
   /* USER CODE END LPUART1_Init 0 */
 
   /* USER CODE BEGIN LPUART1_Init 1 */
@@ -686,10 +706,10 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOG_CLK_ENABLE();
   HAL_PWREx_EnableVddIO2();
   __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, LD3_Pin|LD2_Pin, GPIO_PIN_RESET);
@@ -703,11 +723,23 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PF12 */
-  GPIO_InitStruct.Pin = GPIO_PIN_12;
+  /*Configure GPIO pin : BUTTON_SKIP_Pin */
+  GPIO_InitStruct.Pin = BUTTON_SKIP_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
+  HAL_GPIO_Init(BUTTON_SKIP_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : TEMP_DOWN_Pin */
+  GPIO_InitStruct.Pin = TEMP_DOWN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(TEMP_DOWN_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : TEMP_UP_Pin */
+  GPIO_InitStruct.Pin = TEMP_UP_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(TEMP_UP_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LD3_Pin LD2_Pin */
   GPIO_InitStruct.Pin = LD3_Pin|LD2_Pin;
@@ -715,6 +747,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : BUTTON_VOL_DOWN_Pin BUTTON_VOL_UP_Pin BUTTON_PLAY_Pin BUTTON_REWIND_Pin */
+  GPIO_InitStruct.Pin = BUTTON_VOL_DOWN_Pin|BUTTON_VOL_UP_Pin|BUTTON_PLAY_Pin|BUTTON_REWIND_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
   /*Configure GPIO pins : USB_OverCurrent_Pin SMPS_PG_Pin */
   GPIO_InitStruct.Pin = USB_OverCurrent_Pin|SMPS_PG_Pin;
