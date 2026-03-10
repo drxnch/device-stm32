@@ -3,12 +3,18 @@
 #include "ssd1306.h"
 #include "ssd1306_tests.h"
 #include "ssd1306_fonts.h"
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdbool.h>
 
 static const char* song_name = "Thriller";
 
-void DrawHomePage() {
+void DrawHomePage(int8_t scroll) {
     uint8_t y = 0;
+    char volume[8];
     ssd1306_Fill(Black);
+    sprintf(volume, "%d", scroll);
 
     //Time and Battery
     #ifdef SSD1306_INCLUDE_FONT_6x8
@@ -34,7 +40,7 @@ void DrawHomePage() {
     //Additional Status Icons
     #ifdef SSD1306_INCLUDE_FONT_6x8
     ssd1306_SetCursor(2, y);
-    ssd1306_WriteString("Status Symbols Here", Font_6x8, White); //TODO: Symbols that update here dynamically
+    ssd1306_WriteString(volume, Font_6x8, White); //TODO: Symbols that update here dynamically
     #endif
 
     //Update the damn screen

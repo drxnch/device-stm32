@@ -19,7 +19,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "fatfs.h"
-#include "stm32l4xx_hal_gpio.h"
 #include "usb_host.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -65,8 +64,8 @@ typedef struct {
 
 
 
-#define DOWN_PRESSED (HAL_GPIO_ReadPin(TEMP_DOWN_GPIO_Port, TEMP_DOWN_Pin) == GPIO_PIN_SET)
-#define UP_PRESSED   (HAL_GPIO_ReadPin(TEMP_UP_GPIO_Port, TEMP_UP_Pin) == GPIO_PIN_SET)
+#define DOWN_PRESSED (HAL_GPIO_ReadPin(BUTTON_VOL_DOWN_GPIO_Port, BUTTON_VOL_DOWN_Pin) == GPIO_PIN_SET)
+#define UP_PRESSED   (HAL_GPIO_ReadPin(BUTTON_VOL_UP_Port, BUTTON_VOL_UP_Pin) == GPIO_PIN_SET)
 #define BUTTON_PRESSED 1
 
 /* USER CODE END PM */
@@ -132,6 +131,10 @@ uint8_t last_button_state = 0;
 // Display
 
 // Miscellaneous (Buttons, Sensors, States etc.)
+uint8_t music_volume = 0;
+int8_t scroll_value = 0;
+int8_t previous_scroll_value = 0;
+uint8_t refresh_needed = 0;
 
 
 /* USER CODE END PV */
@@ -215,7 +218,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+    HAL_Init();
 
   /* USER CODE BEGIN Init */
 
@@ -257,9 +260,10 @@ int main(void)
 // Initialisations
   HAL_TIM_Base_Start_IT(&htim1);
   ssd1306_Init();
+  //char display_buffer[20]; // Make sure this is large enough!
 
   // Display Initialisation
-  DrawHomePage();
+  DrawHomePage(scroll_value);
   // PlaySong(test_song);
   /* USER CODE END 2 */
 
@@ -275,31 +279,53 @@ int main(void)
                                                                        
 */
   while (1) {
-    bool down_button_current = DOWN_PRESSED;
 
-// Only trigger ONCE when the button is first pushed down
-if (down_button_current && !down_button_last) {
-    switch (current_state) {
-        case HOME_STATE:   next_state = MUSIC_STATE; break;
-        case MUSIC_STATE:  next_state = TIMER_STATE; break;
-        case TIMER_STATE:  next_state = ALARM_STATE; break;
-        case ALARM_STATE:  next_state = HOME_STATE;  break;
+// 1. Calculate the change (Delta)
+int8_t delta = scroll_value - previous_scroll_value;
+
+if (delta != 0) {
+    refresh_needed = 1;
+    // 2. Update the state based on direction
+    if (delta > 0) { // Clockwise
+        switch (current_state) {
+            case HOME_STATE:  next_state = MUSIC_STATE; break;
+            case MUSIC_STATE: next_state = TIMER_STATE; break;
+            case TIMER_STATE: next_state = ALARM_STATE; break;
+            case ALARM_STATE: next_state = HOME_STATE;  break;
+        }
+    } 
+    else { // Counter-Clockwise
+        switch (current_state) {
+            case HOME_STATE:  next_state = ALARM_STATE; break;
+            case MUSIC_STATE: next_state = HOME_STATE;  break;
+            case TIMER_STATE: next_state = MUSIC_STATE; break;
+            case ALARM_STATE: next_state = TIMER_STATE; break;
+        }
     }
+    // 3. Sync the values so we don't trigger again until the next move
+    previous_scroll_value = scroll_value;
 }
-down_button_last = down_button_current; // Save for next loop
 
 // Only Redraw if the state actually changed to save I2C bandwidth
-if (current_state != next_state) {
+if (current_state != next_state || refresh_needed) {
     current_state = next_state;
     switch (current_state) {
-        case HOME_STATE:  DrawHomePage(); break;
-        case MUSIC_STATE: DrawMusicPlayerIcon(); break;
-        case TIMER_STATE: DrawTimerIcon(); break;
-        case ALARM_STATE: DrawAlarmIcon(); break;
+        case HOME_STATE:  
+          DrawHomePage(scroll_value); 
+          break;
+        case MUSIC_STATE: 
+          DrawMusicPlayerIcon(); 
+          break;
+        case TIMER_STATE: 
+          DrawTimerIcon(); 
+          break;
+        case ALARM_STATE: 
+          DrawAlarmIcon(); 
+          break;
     }
 }
 
-    if (DOWN_PRESSED) {
+    if (DOWN_PRESSED | HAL_GPIO_ReadPin(BUTTON_REWIND_GPIO_Port, BUTTON_REWIND_Pin)) {
       HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
     }
     else HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
@@ -723,23 +749,17 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : BUTTON_SKIP_Pin */
-  GPIO_InitStruct.Pin = BUTTON_SKIP_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(BUTTON_SKIP_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : TEMP_DOWN_Pin */
-  GPIO_InitStruct.Pin = TEMP_DOWN_Pin;
+  /*Configure GPIO pins : BUTTON_REWIND_Pin BUTTON_VOL_UP_Pin */
+  GPIO_InitStruct.Pin = BUTTON_REWIND_Pin|BUTTON_VOL_UP_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  HAL_GPIO_Init(TEMP_DOWN_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : TEMP_UP_Pin */
-  GPIO_InitStruct.Pin = TEMP_UP_Pin;
+  /*Configure GPIO pins : BUTTON_VOL_DOWN_Pin BUTTON_SCROLL_Pin */
+  GPIO_InitStruct.Pin = BUTTON_VOL_DOWN_Pin|BUTTON_SCROLL_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(TEMP_UP_GPIO_Port, &GPIO_InitStruct);
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LD3_Pin LD2_Pin */
   GPIO_InitStruct.Pin = LD3_Pin|LD2_Pin;
@@ -748,10 +768,22 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : BUTTON_VOL_DOWN_Pin BUTTON_VOL_UP_Pin BUTTON_PLAY_Pin BUTTON_REWIND_Pin */
-  GPIO_InitStruct.Pin = BUTTON_VOL_DOWN_Pin|BUTTON_VOL_UP_Pin|BUTTON_PLAY_Pin|BUTTON_REWIND_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  /*Configure GPIO pin : SCROLL_S1_Pin */
+  GPIO_InitStruct.Pin = SCROLL_S1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(SCROLL_S1_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : SCROLL_S2_Pin */
+  GPIO_InitStruct.Pin = SCROLL_S2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(SCROLL_S2_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : BUTTON_SKIP_Pin BUTTON_PLAY_Pin */
+  GPIO_InitStruct.Pin = BUTTON_SKIP_Pin|BUTTON_PLAY_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
   /*Configure GPIO pins : USB_OverCurrent_Pin SMPS_PG_Pin */
@@ -766,6 +798,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -789,6 +825,25 @@ void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai) {
         HAL_SAI_DMAStop(&hsai_BlockA1);
         f_close(&MyFile);
         playing = 0;
+    }
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    // Check if the interrupt came from our Scroll Pin S1
+    if (GPIO_Pin == SCROLL_S1_Pin) 
+    {
+        // Read the state of the second pin (S2) to determine direction
+        if (HAL_GPIO_ReadPin(SCROLL_S2_GPIO_Port, SCROLL_S2_Pin) == GPIO_PIN_SET) 
+        {
+            // The wheel turned Clockwise
+            scroll_value--; 
+        } 
+        else 
+        {
+            // The wheel turned Counter-Clockwise
+            scroll_value++;
+        }
     }
 }
 /* USER CODE END 4 */
