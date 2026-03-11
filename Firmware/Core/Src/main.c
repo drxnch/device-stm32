@@ -50,23 +50,37 @@ typedef struct {
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-#define HOME_STATE 0
-#define MUSIC_STATE 1
-#define TIMER_STATE 2
-#define ALARM_STATE 3
-#define TIMER_PRESET_STATE 4
-#define SET_TIMER_STATE 5
-#define MUSIC_PLAYLIST_STATE 6
-#define MUSIC_ALBUM_STATE 7
-#define MUSIC_ALLSONGS_STATE 8
-#define ALARM_PRESET_STATE 9
-#define ALARM_SET_STATE 10
+
+/* Top Level / Home States */
+#define HOME_PAGE_STATE           0
+#define HOME_MUSIC_STATE     1
+#define HOME_TIMER_STATE     2
+#define HOME_ALARM_STATE     3
+
+/* Music Sub-States */
+#define MUSIC_HOME_STATE 4
+#define MUSIC_PLAYLIST_STATE 5
+#define MUSIC_ALBUM_STATE    6
+#define MUSIC_ALLSONGS_STATE 7
+#define MUSIC_ARTIST_STATE 14
+
+/* Timer Sub-States */
+#define TIMER_HOME_STATE 8
+#define TIMER_PRESET_STATE   9
+#define SET_TIMER_STATE      10
+
+/* Alarm Sub-States */
+#define ALARM_HOME_STATE 11
+#define ALARM_PRESET_STATE   12
+#define ALARM_SET_STATE      13
 
 
-
-#define DOWN_PRESSED (HAL_GPIO_ReadPin(BUTTON_VOL_DOWN_GPIO_Port, BUTTON_VOL_DOWN_Pin) == GPIO_PIN_SET)
-#define UP_PRESSED   (HAL_GPIO_ReadPin(BUTTON_VOL_UP_Port, BUTTON_VOL_UP_Pin) == GPIO_PIN_SET)
-#define BUTTON_PRESSED 1
+#define PLAY_PRESSED (HAL_GPIO_ReadPin(BUTTON_PLAY_GPIO_Port, BUTTON_PLAY_Pin) == GPIO_PIN_SET)
+#define REWIND_PRESSED (HAL_GPIO_ReadPin(BUTTON_REWIND_GPIO_Port, BUTTON_REWIND_Pin) == GPIO_PIN_SET)
+#define SKIP_PRESSED (HAL_GPIO_ReadPin(BUTTON_SKIP_GPIO_Port, BUTTON_SKIP_Pin) == GPIO_PIN_SET)
+#define VOL_DOWN_PRESSED (HAL_GPIO_ReadPin(BUTTON_VOL_DOWN_GPIO_Port, BUTTON_VOL_DOWN_Pin) == GPIO_PIN_SET)
+#define VOL_UP_PRESSED   (HAL_GPIO_ReadPin(BUTTON_VOL_UP_GPIO_Port, BUTTON_VOL_UP_Pin) == GPIO_PIN_SET)
+#define SCROLL_BUTTON_PRESSED (HAL_GPIO_ReadPin(BUTTON_SCROLL_GPIO_Port, BUTTON_SCROLL_Pin) == GPIO_PIN_RESET)
 
 /* USER CODE END PM */
 
@@ -100,12 +114,8 @@ TIM_HandleTypeDef htim1;
 */
 
 //Initialisation Code
-uint8_t rtc_time=0;
-uint8_t battery_percentage = 0;
-char song_name[18]; //Change if font size changes
-char artist[18]; // Change if font size changes
-char test_song[9]="music.wav";
-uint8_t current_state = HOME_STATE;
+char test_song[20]="music.wav";
+uint8_t current_state = 0;
 uint8_t next_state = 0;
 bool down_button_last = false;
 
@@ -129,12 +139,16 @@ uint8_t timer_ready = 0;
 uint8_t last_button_state = 0; 
 
 // Display
+uint8_t music_option = 0;
+
 
 // Miscellaneous (Buttons, Sensors, States etc.)
 uint8_t music_volume = 0;
+uint8_t previous_volume = 0;
 int8_t scroll_value = 0;
 int8_t previous_scroll_value = 0;
 uint8_t refresh_needed = 0;
+uint8_t scroll_button_hold = 0;
 
 
 /* USER CODE END PV */
@@ -169,17 +183,39 @@ void MX_USB_HOST_Process(void);
                               
 */
 
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
-  timer_ready = 1;
-	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
+// void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
+//   timer_ready = 1;
+// 	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
 
+// }
+
+void TestInputsOnly() {
+  if (PLAY_PRESSED || REWIND_PRESSED || SKIP_PRESSED || VOL_DOWN_PRESSED || VOL_UP_PRESSED || SCROLL_BUTTON_PRESSED) HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+  else HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 }
 
-void PlaySong(char song[9]) {
+void TestInputsAndDisplay() {
+  uint8_t x = 2;
+  ssd1306_Fill(Black);
+  #ifdef SSD1306_INCLUDE_FONT_7x10
+  ssd1306_SetCursor(2, 25);
+
+  if (PLAY_PRESSED) ssd1306_WriteString("Play", Font_7x10, White);
+  else if (REWIND_PRESSED) ssd1306_WriteString("Rewind", Font_7x10, White);
+  else if (SKIP_PRESSED) ssd1306_WriteString("Skip", Font_7x10, White);
+  else if (VOL_DOWN_PRESSED) ssd1306_WriteString("Volume Down", Font_7x10, White);
+  else if (VOL_UP_PRESSED) ssd1306_WriteString("Volume Up", Font_7x10, White);
+  else if (SCROLL_BUTTON_PRESSED) ssd1306_WriteString("Scroll Pressed", Font_7x10, White);
+  
+  #endif
+  ssd1306_UpdateScreen();
+}
+
+void PlaySong(char song[20]) {
     res = f_mount(&MyFatFS, (TCHAR const *)SDPath, 1);
   if (res == FR_OK) {
     // 2. Open the audio file
-    res = f_open(&MyFile, song, FA_READ);
+    res = f_open(&MyFile, "music.wav", FA_READ);
     if (res == FR_OK) {
       // 3. Skip WAV header (44 bytes)
       f_lseek(&MyFile, 44);
@@ -218,7 +254,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-    HAL_Init();
+  HAL_Init();
 
   /* USER CODE BEGIN Init */
 
@@ -259,12 +295,11 @@ int main(void)
   
 // Initialisations
   HAL_TIM_Base_Start_IT(&htim1);
-  ssd1306_Init();
-  //char display_buffer[20]; // Make sure this is large enough!
 
   // Display Initialisation
-  DrawHomePage(scroll_value);
-  // PlaySong(test_song);
+    ssd1306_Init();
+  //DrawHomePage(music_volume);
+  //PlaySong(test_song);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -279,58 +314,152 @@ int main(void)
                                                                        
 */
   while (1) {
+    //TestInputs();
+    TestInputsAndDisplay();
+// // 1. Calculate the change (Delta)
+// int8_t delta = scroll_value - previous_scroll_value;
+// switch (current_state) {
+//   case HOME_PAGE_STATE:
+//     if (delta !=0) {
+//       if ( delta > 0) next_state = HOME_MUSIC_STATE;
+//       else if (delta < 0) next_state = HOME_ALARM_STATE; 
+//       refresh_needed = 1;
+//     }
+//     break;
+//   case HOME_MUSIC_STATE:
+//     if (delta !=0) {
+//       if ( delta > 0) next_state = HOME_TIMER_STATE;
+//       else if (delta < 0) next_state = HOME_PAGE_STATE;
+//       refresh_needed = 1;
+//     }
+//     if (SCROLL_BUTTON_PRESSED) next_state = MUSIC_HOME_STATE;
 
-// 1. Calculate the change (Delta)
-int8_t delta = scroll_value - previous_scroll_value;
+//     break;
+//   case HOME_TIMER_STATE:
+//     if (delta !=0) {
+//       if ( delta > 0) next_state = HOME_ALARM_STATE;
+//       else if (delta < 0) next_state = HOME_MUSIC_STATE; 
+//     }
+//     if (SCROLL_BUTTON_PRESSED) next_state = TIMER_HOME_STATE;
+//     refresh_needed = 1;
+//     break;
+//   case HOME_ALARM_STATE:
+//     if (delta !=0) {
+//       if ( delta > 0) next_state = HOME_PAGE_STATE;
+//       else if (delta < 0) next_state = HOME_TIMER_STATE; 
+//       refresh_needed = 1;
+//     }
+//     if (SCROLL_BUTTON_PRESSED) next_state = ALARM_HOME_STATE;
 
-if (delta != 0) {
-    refresh_needed = 1;
-    // 2. Update the state based on direction
-    if (delta > 0) { // Clockwise
-        switch (current_state) {
-            case HOME_STATE:  next_state = MUSIC_STATE; break;
-            case MUSIC_STATE: next_state = TIMER_STATE; break;
-            case TIMER_STATE: next_state = ALARM_STATE; break;
-            case ALARM_STATE: next_state = HOME_STATE;  break;
-        }
-    } 
-    else { // Counter-Clockwise
-        switch (current_state) {
-            case HOME_STATE:  next_state = ALARM_STATE; break;
-            case MUSIC_STATE: next_state = HOME_STATE;  break;
-            case TIMER_STATE: next_state = MUSIC_STATE; break;
-            case ALARM_STATE: next_state = TIMER_STATE; break;
-        }
-    }
-    // 3. Sync the values so we don't trigger again until the next move
-    previous_scroll_value = scroll_value;
-}
+//     break;
+  
+// }
 
-// Only Redraw if the state actually changed to save I2C bandwidth
-if (current_state != next_state || refresh_needed) {
-    current_state = next_state;
-    switch (current_state) {
-        case HOME_STATE:  
-          DrawHomePage(scroll_value); 
-          break;
-        case MUSIC_STATE: 
-          DrawMusicPlayerIcon(); 
-          break;
-        case TIMER_STATE: 
-          DrawTimerIcon(); 
-          break;
-        case ALARM_STATE: 
-          DrawAlarmIcon(); 
-          break;
-    }
-}
+// if (current_state != next_state) {
+//     current_state = next_state;
+//     refresh_needed = 1; // Force redraw on state change
+// }
+// // Only Redraw if the state actually changed to save I2C bandwidth
+// if (refresh_needed) {
+//   refresh_needed = 0;
+//     switch (current_state) {
+//         case HOME_PAGE_STATE:  
+//           DrawHomePage(music_volume); 
+//           break;
+//         case HOME_MUSIC_STATE: DrawMusicPlayerIcon(); break;
+//         case MUSIC_HOME_STATE: DrawMusicPlayerHomePage(music_option); break;
+//         case MUSIC_ALLSONGS_STATE: PlaySong(test_song); break;
+//         case HOME_TIMER_STATE: 
+//           DrawTimerIcon(); 
+//           break;
+//         case HOME_ALARM_STATE: 
+//           DrawAlarmIcon(); 
+//           break;
+//     }
+// }
+// delta = 0;
 
-    if (DOWN_PRESSED | HAL_GPIO_ReadPin(BUTTON_REWIND_GPIO_Port, BUTTON_REWIND_Pin)) {
-      HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
-    }
-    else HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+// if (delta != 0) {
+//     refresh_needed = 1;
+//     // 2. Update the state based on direction
+//     if (delta > 0) { // Clockwise
+//       switch (current_state) {
+//           case HOME_PAGE_STATE:  next_state = HOME_MUSIC_STATE; break;
+//           case HOME_MUSIC_STATE: next_state = HOME_TIMER_STATE; break;
+//           case HOME_TIMER_STATE: next_state = HOME_ALARM_STATE; break;
+//           case HOME_ALARM_STATE: next_state = HOME_PAGE_STATE;  break;
+//           case MUSIC_HOME_STATE: break;
+//       }
+//       if (music_option < 4) {
+//         music_option++;
+//       }
+//     } 
+//     else { // Counter-Clockwise
+//         switch (current_state) {
+//             case HOME_PAGE_STATE:  next_state = HOME_ALARM_STATE; break;
+//             case HOME_MUSIC_STATE: next_state = HOME_PAGE_STATE;  break;
+//             case HOME_TIMER_STATE: next_state = HOME_MUSIC_STATE; break;
+//             case HOME_ALARM_STATE: next_state = HOME_TIMER_STATE; break;
+//         }
+//         if (music_option > 0) {
+//           music_option--;
+//         }
+//     }
+//     // 3. Sync the values so we don't trigger again until the next move
+//     previous_scroll_value = scroll_value;
+// }
+
+// if (previous_volume != music_volume) {
+//   DrawVolume(music_volume);
+//   previous_volume = music_volume;
+// }
 
 
+// if (SCROLL_BUTTON_PRESSED) {
+//   refresh_needed = 1;
+//   switch (current_state) {
+//     case HOME_MUSIC_STATE: next_state = MUSIC_HOME_STATE;  break;
+//     case MUSIC_HOME_STATE:
+//       switch (music_option) {
+//         case ALL_SONGS_OPTION: next_state = MUSIC_ALLSONGS_STATE; break;
+//         case PLAYLISTS_OPTION: next_state = MUSIC_PLAYLIST_STATE; break;
+//         case ALBUMS_OPTION: next_state = MUSIC_ALBUM_STATE; break;
+//         case ARTISTS_OPTION: next_state = MUSIC_ARTIST_STATE; break;
+//       }
+//       break;
+//     case MUSIC_PLAYLIST_STATE: break;
+//     case MUSIC_ALBUM_STATE: break;
+//     case MUSIC_ARTIST_STATE: break;
+//     case HOME_TIMER_STATE: next_state = TIMER_HOME_STATE; break;
+//     case TIMER_HOME_STATE: break;
+//     case HOME_ALARM_STATE: next_state = ALARM_HOME_STATE; break;
+//     case ALARM_HOME_STATE: break;
+//   }
+// }
+
+
+// if (current_state != next_state) {
+//     current_state = next_state;
+//     refresh_needed = 1; // Force redraw on state change
+// }
+// // Only Redraw if the state actually changed to save I2C bandwidth
+// if (refresh_needed) {
+//   refresh_needed = 0;
+//     switch (current_state) {
+//         case HOME_PAGE_STATE:  
+//           DrawHomePage(music_volume); 
+//           break;
+//         case HOME_MUSIC_STATE: DrawMusicPlayerIcon(); break;
+//         case MUSIC_HOME_STATE: DrawMusicPlayerHomePage(music_option); break;
+//         case MUSIC_ALLSONGS_STATE: PlaySong(test_song); break;
+//         case HOME_TIMER_STATE: 
+//           DrawTimerIcon(); 
+//           break;
+//         case HOME_ALARM_STATE: 
+//           DrawAlarmIcon(); 
+//           break;
+//     }
+// }
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
 
@@ -660,9 +789,9 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 14200;
+  htim1.Init.Prescaler = 14199;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 999;
+  htim1.Init.Period = 65535;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -743,23 +872,23 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOG, USB_PowerSwitchOn_Pin|SMPS_V1_Pin|SMPS_EN_Pin|SMPS_SW_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : B1_Pin */
-  GPIO_InitStruct.Pin = B1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : BUTTON_REWIND_Pin BUTTON_VOL_UP_Pin */
-  GPIO_InitStruct.Pin = BUTTON_REWIND_Pin|BUTTON_VOL_UP_Pin;
+  /*Configure GPIO pin : BUTTON_REWIND_Pin */
+  GPIO_InitStruct.Pin = BUTTON_REWIND_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
+  HAL_GPIO_Init(BUTTON_REWIND_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : BUTTON_VOL_DOWN_Pin BUTTON_SCROLL_Pin */
-  GPIO_InitStruct.Pin = BUTTON_VOL_DOWN_Pin|BUTTON_SCROLL_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  /*Configure GPIO pins : BUTTON_VOL_UP_Pin BUTTON_VOL_DOWN_Pin */
+  GPIO_InitStruct.Pin = BUTTON_VOL_UP_Pin|BUTTON_VOL_DOWN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : BUTTON_SCROLL_Pin */
+  GPIO_InitStruct.Pin = BUTTON_SCROLL_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(BUTTON_SCROLL_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LD3_Pin LD2_Pin */
   GPIO_InitStruct.Pin = LD3_Pin|LD2_Pin;
@@ -830,20 +959,39 @@ void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai) {
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-    // Check if the interrupt came from our Scroll Pin S1
-    if (GPIO_Pin == SCROLL_S1_Pin) 
-    {
-        // Read the state of the second pin (S2) to determine direction
-        if (HAL_GPIO_ReadPin(SCROLL_S2_GPIO_Port, SCROLL_S2_Pin) == GPIO_PIN_SET) 
-        {
-            // The wheel turned Clockwise
-            scroll_value--; 
+    /* 1. SCROLL WHEEL (PD8) */
+    switch (GPIO_Pin) {
+      case SCROLL_S1_Pin:
+        // Direction check using S2 (PD9)
+        (HAL_GPIO_ReadPin(SCROLL_S2_GPIO_Port, SCROLL_S2_Pin) == GPIO_PIN_SET) ? scroll_value-- : scroll_value++;
+        break;
+      case BUTTON_VOL_UP_Pin:
+          if (music_volume < 20) {
+              music_volume++;
+          }
+          break;
+
+      case BUTTON_VOL_DOWN_Pin:
+          if (music_volume > 0) {
+              music_volume--;
+          }
+          break;
+      case BUTTON_SCROLL_Pin:
+        if (HAL_GPIO_ReadPin(BUTTON_SCROLL_GPIO_Port, BUTTON_SCROLL_Pin) == GPIO_PIN_SET) {
+            // Button just pressed: Start/Reset Timer
+            __HAL_TIM_SET_COUNTER(&htim1, 0); 
+            HAL_TIM_Base_Start(&htim1);
+        } else {
+            // Button released: Read Timer
+            uint32_t duration = __HAL_TIM_GET_COUNTER(&htim1);
+            HAL_TIM_Base_Stop(&htim1);
+
+            if (duration > 1500) {
+                scroll_button_hold = 1;
+            } else if (duration > 50) {
+                scroll_button_hold = 0;
+            }
         } 
-        else 
-        {
-            // The wheel turned Counter-Clockwise
-            scroll_value++;
-        }
     }
 }
 /* USER CODE END 4 */

@@ -3,6 +3,7 @@
 #include "ssd1306.h"
 #include "ssd1306_tests.h"
 #include "ssd1306_fonts.h"
+#include "display.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -55,6 +56,99 @@ void DrawMusicPlayerIcon() {
     ssd1306_WriteString("Music Icon Here", Font_7x10, Black); // TODO: Change to music icon
     #endif
 
+    ssd1306_UpdateScreen();
+}
+
+void DrawMusicPlayerHomePage(uint8_t option) {
+    uint8_t y=2;
+    ssd1306_Fill(Black);
+                #ifdef SSD1306_INCLUDE_FONT_7x10
+
+    if (option == ALL_SONGS_OPTION) {
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("All Songs", Font_7x10, Black); // TODO: Change to music icon
+    y+=10;
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("Playlists", Font_7x10, White); // TODO: Change to music icon
+    y+=10;
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("Artists", Font_7x10, White); // TODO: Change to music icon
+    y+=10;
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("Albums", Font_7x10, White);
+    }
+    else if (option == PLAYLISTS_OPTION) {
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("All Songs", Font_7x10, White); // TODO: Change to music icon
+    y+=10;
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("Playlists", Font_7x10, Black); // TODO: Change to music icon
+    y+=10;
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("Artists", Font_7x10, White); // TODO: Change to music icon
+    y+=10;
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("Albums", Font_7x10, White);
+    }
+    else     if (option == ARTISTS_OPTION) {
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("All Songs", Font_7x10, White); // TODO: Change to music icon
+    y+=10;
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("Playlists", Font_7x10, White); // TODO: Change to music icon
+    y+=10;
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("Artists", Font_7x10, Black); // TODO: Change to music icon
+    y+=10;
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("Albums", Font_7x10, White);
+    }
+    else if (option == ALBUMS_OPTION) {
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("All Songs", Font_7x10, White); // TODO: Change to music icon
+    y+=10;
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("Playlists", Font_7x10, White); // TODO: Change to music icon
+    y+=10;
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("Artists", Font_7x10, White); // TODO: Change to music icon
+    y+=10;
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("Albums", Font_7x10, Black);
+    }
+    else {
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("All Songs", Font_7x10, White); // TODO: Change to music icon
+    y+=10;
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("Playlists", Font_7x10, White); // TODO: Change to music icon
+    y+=10;
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("Artists", Font_7x10, White); // TODO: Change to music icon
+    y+=10;
+
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteString("Albums", Font_7x10, White);
+    }
+
+    #endif
     ssd1306_UpdateScreen();
 }
 
@@ -163,4 +257,16 @@ void DrawTimerIcon() {
     ssd1306_WriteString("Timer Icon Here", Font_7x10, Black); // TODO: Change to Timer icon
     #endif
     ssd1306_UpdateScreen();
+}
+
+void DrawVolume(uint8_t volume) {
+    ssd1306_Fill(Black);
+    char vol_char[20];
+    sprintf(vol_char,"Volume: %d", volume);
+    
+    #ifdef SSD1306_INCLUDE_FONT_7x10
+    ssd1306_SetCursor(10, 35);
+    ssd1306_WriteString(vol_char, Font_7x10, Black); // TODO: Change to Timer icon
+    #endif
+    ssd1306_UpdateScreen();   
 }

@@ -57,16 +57,16 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define B1_Pin GPIO_PIN_13
-#define B1_GPIO_Port GPIOC
 #define MCO_Pin GPIO_PIN_0
 #define MCO_GPIO_Port GPIOH
 #define BUTTON_REWIND_Pin GPIO_PIN_12
 #define BUTTON_REWIND_GPIO_Port GPIOF
-#define BUTTON_VOL_UP_Pin GPIO_PIN_13
-#define BUTTON_VOL_UP_GPIO_Port GPIOF
+#define BUTTON_VOL_UP_Pin GPIO_PIN_7
+#define BUTTON_VOL_UP_GPIO_Port GPIOE
+#define BUTTON_VOL_UP_EXTI_IRQn EXTI9_5_IRQn
 #define BUTTON_VOL_DOWN_Pin GPIO_PIN_9
 #define BUTTON_VOL_DOWN_GPIO_Port GPIOE
+#define BUTTON_VOL_DOWN_EXTI_IRQn EXTI9_5_IRQn
 #define BUTTON_SCROLL_Pin GPIO_PIN_11
 #define BUTTON_SCROLL_GPIO_Port GPIOE
 #define LD3_Pin GPIO_PIN_14

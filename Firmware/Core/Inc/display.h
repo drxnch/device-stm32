@@ -3,10 +3,15 @@
 
 void DrawHomePage(int8_t scroll);
 void DrawMusicPlayerIcon();
-void DrawMusicPlayerHomePage_AllSongsSelected();
-void DrawMusicPlayerHomePage_PlaylistsSelected();
-void DrawMusicPlayerHomePage_AlbumsSelected();
+void DrawMusicPlayerHomePage(uint8_t options);
 void DrawAlarmIcon();
 void DrawTimerIcon();
+void DrawSongList(char* song_1[18], char* song_2[18], char* song_3[18]);
+void DrawVolume(uint8_t volume);
+
+#define ALL_SONGS_OPTION 1
+#define PLAYLISTS_OPTION 2
+#define ARTISTS_OPTION 3
+#define ALBUMS_OPTION 4
 
 #endif
