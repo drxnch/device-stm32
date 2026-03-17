@@ -19,7 +19,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "fatfs.h"
-#include "stm32l4xx_hal_tim.h"
 #include "usb_host.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -37,48 +36,53 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+
+typedef enum {
+  STATE_HOME,
+  STATE_TIMER,
+  STATE_ALARM,
+  STATE_MUSIC,
+  STATE_SETTINGS,
+} State_t;
+
+typedef enum {
+  NONE,
+  EVENT_SCROLL_HOLD,
+  EVENT_SCROLL_PRESS,
+} Event_t;
+
 typedef struct {
   char *name;
-  uint8_t next_screen;  
+  State_t next_screen;  
 } menu_screen;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
 /* Top Level / Home States */
-
 #define MAIN_MENU 0
+
+/* Music Substates */
 #define MUSIC_MENU 1
-#define TIMER_MENU 2
-#define ALARM_MENU 3
-#define SETTINGS_MENU 4
-
-// #define HOME_PAGE_STATE           0
-// #define HOME_MUSIC_STATE     1
-// #define HOME_TIMER_STATE     2
-// #define HOME_ALARM_STATE     3
-
-// /* Music Sub-States */
 // #define MUSIC_HOME_STATE 4
 // #define MUSIC_PLAYLIST_STATE 5
 // #define MUSIC_ALBUM_STATE    6
 // #define MUSIC_ALLSONGS_STATE 7
 // #define MUSIC_ARTIST_STATE 14
 
-// /* Timer Sub-States */
-#define PRESET_TIMERS_MENU   9
-#define SET_TIMER_MENU
+/* Timer Substates */
+#define TIMER_MENU 2
+#define PRESET_TIMERS_MENU   20
+#define SET_TIMER_MENU 21
 
-// /* Alarm Sub-States */
-// #define ALARM_HOME_STATE 11
-// #define ALARM_PRESET_STATE   12
-// #define ALARM_SET_STATE      13
+/* Alarm Substates */
+#define ALARM_MENU 3
+#define PRESET_ALARM_MENU   30
+#define SET_ALARM_MENU      31
+
+/* Settings Substates*/
+#define SETTINGS_MENU 4
 
 //Debugging defines
 #define LD3_ON  (HAL_GPIO_WritePin(LD3_GPIO_Port,LD3_Pin, GPIO_PIN_SET))
@@ -93,13 +97,20 @@ typedef struct {
 #define SKIP_PRESSED (HAL_GPIO_ReadPin(BUTTON_SKIP_GPIO_Port, BUTTON_SKIP_Pin) == GPIO_PIN_SET)
 #define VOL_DOWN_PRESSED (HAL_GPIO_ReadPin(BUTTON_VOL_DOWN_GPIO_Port, BUTTON_VOL_DOWN_Pin) == GPIO_PIN_SET)
 #define VOL_UP_PRESSED   (HAL_GPIO_ReadPin(BUTTON_VOL_UP_GPIO_Port, BUTTON_VOL_UP_Pin) == GPIO_PIN_SET)
-#define SCROLL_BUTTON_PRESSED (HAL_GPIO_ReadPin(BUTTON_SCROLL_GPIO_Port, BUTTON_SCROLL_Pin) == GPIO_PIN_RESET)
+#define SCROLL_BUTTON_PRESSED (HAL_GPIO_ReadPin(BUTTON_SCROLL_GPIO_Port, BUTTON_SCROLL_Pin) == GPIO_PIN_SET)
 
+#define SCROLL_KEY_HOLD_TIME 1000
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
+
+CRC_HandleTypeDef hcrc;
 
 I2C_HandleTypeDef hi2c1;
 
@@ -125,9 +136,32 @@ TIM_HandleTypeDef htim1;
                                                      
                                                                   
 */
+Event_t input_event;
+volatile State_t currentState = STATE_HOME;
 
+/* GPIO Inputs */
+uint8_t input_register;
+#define SCROLL_KEY_BIT 3
+#define REWIND_KEY_BIT 2
+#define PLAY_KEY_BIT 1
+#define SKIP_KEY_BIT 0
+
+uint8_t scroll_register;
+#define SCROLL_FLAG_BIT 1
+#define CLOCKWISE_SCROLL_BIT 0
+#define ANTICLOCKWISE_SCROLL_BIT 2
+bool scroll_key_pressed = false;
+bool scroll_key_held = false;
+
+static uint32_t phase = 0;
+//Global Variables
+uint8_t music_volume = 0;
+
+static bool test_refresh = false;
+static uint8_t draw_state = 0;
+static uint32_t button_hold_time = 0;
 //Initialisation Code
-char test_song[20]="music.wav";
+uint8_t last_state = 0;
 uint8_t current_state = 0;
 uint8_t next_state = 0;
 bool down_button_last = false;
@@ -143,7 +177,7 @@ uint32_t byteswritten;
 // Audio
 #define AUDIO_BUF_SIZE 4096 
 #define READBUF_SIZE 4096
-uint16_t audio_buffer[AUDIO_BUF_SIZE]; // The main buffer
+int16_t audio_buffer[AUDIO_BUF_SIZE]; // The main buffer
 uint8_t playing = 0;                   // State flag
 UINT bytes_read;                       // To track SD card progress
 uint8_t readBuf[READBUF_SIZE]; // Buffer for encoded MP3 data
@@ -161,27 +195,42 @@ uint8_t button_scroll_flag = 0;
 
 // Miscellaneous (Buttons, Sensors, States etc.)
 // All Inputs
-uint8_t input_flags = 0x0; // Scroll Button | Scroll 2 (S2) | Scroll 1 (S1) | Vol Down | Vol Up | Rewind | Play | Skip
-#define SCROLL_KEY_BIT 7
-#define S2_BIT 6
-#define S1_BIT 5
-#define VOL_DOWN_BIT 4
-#define VOL_UP 3
-#define REWIND_KEY_BIT 2
-#define PLAY_KEY_BIT 1
-#define SKIP_KEY_BIT 0
+
 
 
 uint8_t previous_volume = 0;
 volatile int8_t scroll_value = 0;
 int8_t previous_scroll_value = 0;
 uint8_t refresh_needed = 0;
-uint8_t scroll_button_hold = 0;
+bool scroll_button_hold =false;
 
 uint8_t option = 0;
-uint8_t music_volume = 0;
 GPIO_PinState s1, s2 = GPIO_PIN_RESET;
 
+  menu_screen main_menu[] = {
+    {"Music", STATE_MUSIC},
+    {"Timer", STATE_TIMER},
+    {"Alarm", STATE_ALARM},
+    {"Settings", STATE_SETTINGS}
+  };
+
+  menu_screen timer_menu[] = {
+    {"Back", STATE_HOME},
+    {"Preset Timers", STATE_HOME},
+    {"Set Timer", STATE_HOME}
+  };
+
+  // menu_screen timer_preset_menu[] = {
+  //   {"Back", MAIN_MENU},
+  //   {"5 mins", MAIN_MENU},
+  //   {"10 mins",MAIN_MENU}
+  // };
+
+  // menu_screen alarm_menu[] = {
+  //   {"Back", MAIN_MENU},
+  //   {"Preset Alarms", PRESET_ALARM_MENU},
+  //   {"Set Alarm", SET_ALARM_MENU}
+  // };
 
 /* USER CODE END PV */
 
@@ -196,6 +245,7 @@ static void MX_I2C1_Init(void);
 static void MX_SDMMC1_SD_Init(void);
 static void MX_SAI1_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_CRC_Init(void);
 void MX_USB_HOST_Process(void);
 
 /* USER CODE BEGIN PFP */
@@ -221,6 +271,84 @@ void MX_USB_HOST_Process(void);
 
 // }
 
+void Check_Scroll_Key_Hold() {
+  if ((input_register & (1 << SCROLL_KEY_BIT)) && !scroll_key_held) {
+    __HAL_TIM_SET_COUNTER(&htim1, 0);
+    HAL_TIM_Base_Start(&htim1);
+    scroll_key_held = true;
+  }
+  if (!(input_register & (1 << SCROLL_KEY_BIT)) && scroll_key_held) {
+    button_hold_time = __HAL_TIM_GET_COUNTER(&htim1);
+    HAL_TIM_Base_Stop(&htim1);
+    if (button_hold_time >= SCROLL_KEY_HOLD_TIME) {
+      input_event = EVENT_SCROLL_HOLD;
+    }
+    else {
+      input_event = EVENT_SCROLL_PRESS;
+    }
+    scroll_key_held = false;
+  }
+}
+
+void Check_Scroll() {
+  if (scroll_register & (1 << SCROLL_FLAG_BIT)) {
+    if (scroll_register & (1 << CLOCKWISE_SCROLL_BIT)) {
+      option++;
+    }
+    if (scroll_register & (1 << ANTICLOCKWISE_SCROLL_BIT)) {
+      option--;
+    }
+    scroll_register &= ~(0b00000111); // Clear scroll direction bits and flag
+    if (option > 4) option = 1;
+    if (option < 1) option = 4;
+    refresh_needed = 1;
+  }
+}
+
+void Check_Volume() {
+  if (music_volume > 100) music_volume = 100;
+  else if (music_volume < 0) music_volume = 0;
+}
+
+void Check_Music_Buttons() {
+  if ((input_register & (1 << PLAY_PRESSED)) || (input_register & (1 << SKIP_PRESSED)) || (input_register & (1 << REWIND_PRESSED))) {
+    //Play Song
+    DrawTextToScreen("would play song");
+  }
+}
+
+void UI_State_Machine(Event_t input) {
+  switch (currentState) {
+    case STATE_HOME:
+      if (input_event == EVENT_SCROLL_PRESS) {
+        currentState = main_menu[option-1].next_screen;
+        refresh_needed=1;
+        option=1;
+      }
+      break;
+    case STATE_TIMER:
+      if (input_event == EVENT_SCROLL_PRESS) {
+        currentState = timer_menu[option-1].next_screen;
+        refresh_needed=1;
+        option=1;
+      }
+      break;
+    default:
+      break;
+  }
+  input_event = NONE;
+  if (refresh_needed) {
+    refresh_needed=0;
+    switch (currentState) {
+      case STATE_HOME: DisplayOptions(option,main_menu[0].name, main_menu[1].name, main_menu[2].name, main_menu[3].name); break;
+      case STATE_TIMER: DisplayOptionsTwo(option, timer_menu[0].name, timer_menu[1].name); break;
+      default: break;
+    } 
+  }
+}
+
+/* Testing and Debugging */
+
 void TestInputsOnly() {
   if (PLAY_PRESSED || REWIND_PRESSED || SKIP_PRESSED || VOL_DOWN_PRESSED || VOL_UP_PRESSED || SCROLL_BUTTON_PRESSED) HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
   else HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
@@ -237,9 +365,91 @@ void TestInputsAndDisplay() {
   else if (VOL_DOWN_PRESSED) ssd1306_WriteString("Volume Down", Font_7x10, White);
   else if (VOL_UP_PRESSED) ssd1306_WriteString("Volume Up", Font_7x10, White);
   else if (SCROLL_BUTTON_PRESSED) ssd1306_WriteString("Scroll Pressed", Font_7x10, White);
+  else DrawTextToScreen("No Input");
   
   #endif
   ssd1306_UpdateScreen();
+}
+
+void Test_Scroll() {
+  DrawTextToScreen("Scroll Test");
+  if (scroll_register & (1 << SCROLL_FLAG_BIT)) {
+    if (scroll_register & (1 << CLOCKWISE_SCROLL_BIT)) {
+      DrawTextToScreen("Clockwise");
+        HAL_Delay(1500);
+    }
+    if (scroll_register & (1 << ANTICLOCKWISE_SCROLL_BIT)) {
+      DrawTextToScreen("Anticlockwise");
+      HAL_Delay(1500);
+    }
+    scroll_register &= ~(0b00000111); // Clear scroll direction bits and flag
+  } 
+}
+
+void Test_Scroll_Key_Hold() {
+  char text_time[32];
+
+  if ((input_register & (1 << SCROLL_KEY_BIT)) && !scroll_key_held) {
+    __HAL_TIM_SET_COUNTER(&htim1, 0);
+    HAL_TIM_Base_Start(&htim1);
+    scroll_key_held = true;
+        draw_state=1;
+    test_refresh=true;
+  }
+  if (!(input_register & (1 << SCROLL_KEY_BIT)) && scroll_key_held) {
+    button_hold_time = __HAL_TIM_GET_COUNTER(&htim1);
+    HAL_TIM_Base_Stop(&htim1);
+            draw_state=2;
+    test_refresh=true;
+    //input_register &= ~(1 << SCROLL_KEY_BIT); // Zero this bit
+    if (button_hold_time >= SCROLL_KEY_HOLD_TIME) {
+      scroll_button_hold = true; 
+      scroll_key_pressed = false;
+    }
+    else {
+      scroll_key_pressed = true;
+      scroll_button_hold = false;
+    }
+    // input_register &= ~(1 << SCROLL_KEY_BIT);
+    scroll_key_held = false;
+  }
+  
+  if (scroll_button_hold) {
+    LD2_ON; LD3_OFF;
+  } else if (scroll_key_pressed) {
+    LD3_ON; LD2_OFF;
+  }
+
+if (test_refresh){
+  test_refresh=false;
+  switch (draw_state) {
+    case 0:
+        DrawTextToScreen("Scroll Key Test"); break;
+        case 1:
+        DrawTextToScreen("Starting Timer"); break;
+    case 2:
+      sprintf(text_time,"Held for : %lu", button_hold_time);
+      DrawTextToScreen(text_time);
+      HAL_Delay(5000);
+                  draw_state = 0;  // ← Return to idle state after displaying result
+      break;
+    default: break;
+  }}
+}
+
+void TestSound(void) {
+    DrawTextToScreen("Playing wave now");
+    static uint8_t started = 0;
+    if (started) return;  // Only initialize once
+    
+    for (int i = 0; i < AUDIO_BUF_SIZE; i++) {
+        // Proper signed 16-bit square wave, interleaved L+R
+        int16_t sample = ((i / 50) % 2 == 0) ? 10000 : -10000;
+        ((int16_t*)audio_buffer)[i] = sample;
+    }
+    
+    HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t*)audio_buffer, AUDIO_BUF_SIZE);
+    started = 1;
 }
 
 void TestSD() {
@@ -247,10 +457,8 @@ void TestSD() {
   res = f_mount(&MyFatFS, (TCHAR const *)SDPath, 1); // res = result
 
   if (res == FR_OK) {
-    res = f_mkdir("notes");
-    DrawTextToScreen("mkdir notes");
     if (res == FR_OK || res == FR_EXIST) {
-      res = f_open(&MyFile, "notes/poo.txt", FA_WRITE | FA_CREATE_ALWAYS);
+      res = f_open(&MyFile, "poo.txt", FA_WRITE | FA_CREATE_ALWAYS);
       if (res == FR_OK) {
         f_write(&MyFile, "Gurt: Yo!", 9, &bw);
         DrawTextToScreen("Gurt:Yo!");
@@ -339,6 +547,7 @@ int main(void)
   MX_FATFS_Init();
   MX_SAI1_Init();
   MX_ADC1_Init();
+  MX_CRC_Init();
   /* USER CODE BEGIN 2 */
 
 /*
@@ -352,26 +561,13 @@ int main(void)
 */
   
 // Initialisations
-  HAL_TIM_Base_Start_IT(&htim1);
+  //HAL_TIM_Base_Start_IT(&htim1);
 
   // Display Initialisation
   ssd1306_Init();
-     TestSD();
-
-  menu_screen main_menu[] = {
-    {"Music", MUSIC_MENU},
-    {"Timer", TIMER_MENU},
-    {"Alarm", ALARM_MENU},
-    {"Settings", SETTINGS_MENU}
-  };
-
-  menu_screen timer_menu[] = {
-    {"Back", MAIN_MENU},
-    {"Preset Timers", PRESET_TIMERS_MENU},
-    {"Set Timer", SET_TIMER_MENU}
-  };
-
-  //PlaySong(test_song);
+  //TestSound();
+  //TestSD();
+  
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -390,69 +586,18 @@ int main(void)
     /* Debugging Functions */
     //TestInputs();
     //TestInputsAndDisplay();
+    //TestSoundandDisplay();
+    //Test_Scroll();
+    //Test_Scroll_Key_Hold();
+    //if (input_register & (1 << SCROLL_KEY_BIT)) {LD2_ON;} else {LD2_OFF;}
 
     /*Controller - View Inputs and change variables accordingly*/
-    //Checking scroll
-    static uint8_t last_s1_state = 0;
-    uint8_t current_s1 = (input_flags >> S1_BIT) & 1;
-    if (current_s1 && !last_s1_state) {
-      if ((input_flags >> S2_BIT) & 1) {
-        option ++;
-      }
-      else {
-        option --;
-      }
-      scroll_value = 0;
-      refresh_needed=1;
-      input_flags &= ~((1<<S1_BIT) | (1<<S2_BIT));
-    }
-
-    //Volume
-    if (music_volume > 20) music_volume = 20;
-    else if (music_volume < 0) music_volume = 0;
-
-    if (option > 4) option = 1;
-    else if (option < 1) option = 4;
-
-    switch (current_state) {
-      case MAIN_MENU:
-        if (button_scroll_flag) { 
-          button_scroll_flag = 0;
-          current_state = main_menu[option-1].next_screen; 
-          refresh_needed=1; 
-          option=1;
-        }
-        break;
-      case TIMER_MENU:
-        if (button_scroll_flag) { 
-          button_scroll_flag =0;
-          current_state = timer_menu[option-1].next_screen;
-          refresh_needed=1;
-          option=1;
-        }
-        break;
-      // case MUSIC_MENU:
-      //   if (button_scroll_flag){PageNotMade("Music Menu"); button_scroll_flag = 0;}
-      //   break;
-      // case ALARM_MENU:
-      //   if (button_scroll_flag){PageNotMade("Alarm Menu"); button_scroll_flag = 0;}
-      //   break;
-      // case SETTINGS_MENU:
-      //   if (button_scroll_flag){PageNotMade("Settings Menu"); button_scroll_flag = 0;}
-      //   break;
-      default:
-        break;
-    }
+    Check_Scroll_Key_Hold();
+    Check_Scroll();
+    Check_Volume();
+    Check_Music_Buttons();
+    UI_State_Machine(input_event);
     /* Draw to Screen */
-    if (refresh_needed) {
-      switch (current_state) {
-        case MAIN_MENU: DisplayOptions(option,main_menu[0].name, main_menu[1].name, main_menu[2].name, main_menu[3].name); break;
-        case TIMER_MENU: DisplayOptionsTwo(option, timer_menu[0].name, timer_menu[1].name); break;
-        default: break;
-      }
-      
-    }
-    refresh_needed=0;
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
 
@@ -615,6 +760,37 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief CRC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CRC_Init(void)
+{
+
+  /* USER CODE BEGIN CRC_Init 0 */
+
+  /* USER CODE END CRC_Init 0 */
+
+  /* USER CODE BEGIN CRC_Init 1 */
+
+  /* USER CODE END CRC_Init 1 */
+  hcrc.Instance = CRC;
+  hcrc.Init.DefaultPolynomialUse = DEFAULT_POLYNOMIAL_ENABLE;
+  hcrc.Init.DefaultInitValueUse = DEFAULT_INIT_VALUE_ENABLE;
+  hcrc.Init.InputDataInversionMode = CRC_INPUTDATA_INVERSION_NONE;
+  hcrc.Init.OutputDataInversionMode = CRC_OUTPUTDATA_INVERSION_DISABLE;
+  hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_BYTES;
+  if (HAL_CRC_Init(&hcrc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CRC_Init 2 */
+
+  /* USER CODE END CRC_Init 2 */
 
 }
 
@@ -871,11 +1047,17 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(BUTTON_REWIND_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : BUTTON_VOL_UP_Pin BUTTON_VOL_DOWN_Pin BUTTON_SCROLL_Pin */
-  GPIO_InitStruct.Pin = BUTTON_VOL_UP_Pin|BUTTON_VOL_DOWN_Pin|BUTTON_SCROLL_Pin;
+  /*Configure GPIO pins : BUTTON_VOL_UP_Pin BUTTON_VOL_DOWN_Pin */
+  GPIO_InitStruct.Pin = BUTTON_VOL_UP_Pin|BUTTON_VOL_DOWN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : BUTTON_SCROLL_Pin */
+  GPIO_InitStruct.Pin = BUTTON_SCROLL_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(BUTTON_SCROLL_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LD3_Pin LD2_Pin */
   GPIO_InitStruct.Pin = LD3_Pin|LD2_Pin;
@@ -931,34 +1113,52 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-/* This fills the FIRST half (Index 0 to BUF_SIZE/2 - 1) */
-void HAL_SAI_TxHalfCpltCallback(SAI_HandleTypeDef *hsai) {
-    // We read (Half the samples) * (2 bytes per sample)
-    f_read(&MyFile, &audio_buffer[0], AUDIO_BUF_SIZE, &bytes_read);
+
+void HAL_SAI_ErrorCallback(SAI_HandleTypeDef *hsai) {
+    LD3_ON; // If this lights, DMA is faulting
 }
 
-/* This fills the SECOND half (Index BUF_SIZE/2 to BUF_SIZE - 1) */
-void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai) {
-    // We read starting at the middle index
-    f_read(&MyFile, &audio_buffer[AUDIO_BUF_SIZE/2], AUDIO_BUF_SIZE, &bytes_read);
-    
-    // Check if the amount read is less than a half-buffer
-    if (bytes_read < AUDIO_BUF_SIZE) {
-        HAL_SAI_DMAStop(&hsai_BlockA1);
-        f_close(&MyFile);
-        playing = 0;
+void HAL_SAI_TxHalfCpltCallback(SAI_HandleTypeDef *hsai) {
+    //LD2_ON;
+    for (int i = 0; i < AUDIO_BUF_SIZE / 2; i++) {
+        ((int16_t*)audio_buffer)[i] = ((phase++ / 50) % 2 == 0) ? 10000 : -10000;
     }
 }
+
+void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai) {
+    //LD2_OFF;
+    for (int i = AUDIO_BUF_SIZE / 2; i < AUDIO_BUF_SIZE; i++) {
+        ((int16_t*)audio_buffer)[i] = ((phase++ / 50) % 2 == 0) ? 10000 : -10000;
+    }
+}
+
+// /* This fills the FIRST half (Index 0 to BUF_SIZE/2 - 1) */
+// void HAL_SAI_TxHalfCpltCallback(SAI_HandleTypeDef *hsai) {
+//     // We read (Half the samples) * (2 bytes per sample)
+//     f_read(&MyFile, &audio_buffer[0], AUDIO_BUF_SIZE, &bytes_read);
+// }
+
+// /* This fills the SECOND half (Index BUF_SIZE/2 to BUF_SIZE - 1) */
+// void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai) {
+//     // We read starting at the middle index
+//     f_read(&MyFile, &audio_buffer[AUDIO_BUF_SIZE/2], AUDIO_BUF_SIZE, &bytes_read);
+    
+//     // Check if the amount read is less than a half-buffer
+//     if (bytes_read < AUDIO_BUF_SIZE) {
+//         HAL_SAI_DMAStop(&hsai_BlockA1);
+//         f_close(&MyFile);
+//         playing = 0;
+//     }
+// }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   if (GPIO_Pin == SCROLL_S1_Pin) {
-    if (HAL_GPIO_ReadPin(SCROLL_S1_GPIO_Port, SCROLL_S1_Pin)) {input_flags |= (1 << S1_BIT);} else {input_flags &= ~(1 << S1_BIT);}
-    if (HAL_GPIO_ReadPin(SCROLL_S2_GPIO_Port, SCROLL_S2_Pin)) {input_flags |= (1 << S2_BIT);} else {input_flags &= ~(1 << S2_BIT);}
+    scroll_register |= (1 << SCROLL_FLAG_BIT);
+    scroll_register |= (HAL_GPIO_ReadPin(SCROLL_S2_GPIO_Port, SCROLL_S2_Pin)) ? (1 << ANTICLOCKWISE_SCROLL_BIT) : (1 << CLOCKWISE_SCROLL_BIT);
   }
 
   if (GPIO_Pin == BUTTON_VOL_UP_Pin) {
-    uint8_t button_timer = HAL_TIM_Base_Start_IT(&htim1);
     music_volume++;
   }
 
@@ -967,8 +1167,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   }
 
   if (GPIO_Pin == BUTTON_SCROLL_Pin) {
-    button_scroll_flag = 1;
-  }
+        if (HAL_GPIO_ReadPin(BUTTON_SCROLL_GPIO_Port, BUTTON_SCROLL_Pin) == GPIO_PIN_SET) {
+            // --- PRESS (active low, falling edge) ---
+            input_register |= (1 << SCROLL_KEY_BIT);
+        } else {
+            // --- RELEASE (rising edge) ---
+            input_register &= ~(1 << SCROLL_KEY_BIT);
+        }
+    }
 }
 /* USER CODE END 4 */
 
