@@ -418,3 +418,52 @@ void PageNotMade(char page[15]) {
     ssd1306_WriteString("is not ready (yet)", Font_7x10,White);
 
 }
+
+void timerSetUI(uint8_t current_option, uint8_t minutes, bool button_click) {
+    uint8_t y = 0;
+    char length_text[20];
+    sprintf(length_text, "Length: %d",minutes);
+    ssd1306_Fill(Black);
+
+    switch (current_option) {
+        case 1:
+            y = 0;
+            break;
+        case 2:
+            y = 10;
+            break;
+        case 3:
+            y = 20;
+            break;
+        default:
+            y = 0;
+            break;
+    }
+    
+    ssd1306_SetCursor(2, y);
+    ssd1306_WriteChar('>', Font_7x10, White);
+
+    y=0;
+    #ifdef SSD1306_INCLUDE_FONT_7x10
+    ssd1306_SetCursor(9, y);
+    ssd1306_WriteString("Back", Font_7x10, White);
+    y += 10;
+    
+    if (current_option == 2 && button_click) {
+        ssd1306_SetCursor(9, y);
+        ssd1306_WriteString(length_text, Font_7x10, Black);
+    }
+    else {
+        ssd1306_SetCursor(9, y);
+        ssd1306_WriteString(length_text, Font_7x10, White);
+    }
+    y += 10;
+
+
+    ssd1306_SetCursor(9, y);
+    ssd1306_WriteString("Start", Font_7x10, White);
+    y += 10;
+
+    #endif
+    ssd1306_UpdateScreen();
+}

@@ -1,6 +1,8 @@
 #ifndef DISPLAY_H
 #define DISPLAY_H
 
+#include <stdbool.h>
+
 void DrawHomePage(int8_t scroll);
 void DrawMusicPlayerIcon();
 void DrawMusicPlayerHomePage(uint8_t options);
@@ -13,6 +15,7 @@ void DisplayOptions(int8_t current_option, char option_1[20], char option_2[20],
 void DisplayOptionsTwo(int8_t current_option, char option_1[20], char option_2[20]);
 void DisplayOptionsThree(int8_t current_option, char *option_1, char *option_2, char *option_3);
 void PageNotMade(char page[15]);
+void timerSetUI(uint8_t current_option, uint8_t minutes, bool button_click);
 
 
 

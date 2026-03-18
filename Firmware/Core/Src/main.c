@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "fatfs.h"
+#include "stm32l4xx_hal_tim.h"
 #include "usb_host.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -40,6 +41,8 @@
 typedef enum {
   STATE_HOME,
   STATE_TIMER,
+  STATE_TIMER_SET,
+  STATE_TIMER_DONE,
   STATE_ALARM,
   STATE_MUSIC,
   STATE_SETTINGS,
@@ -49,6 +52,8 @@ typedef enum {
   NONE,
   EVENT_SCROLL_HOLD,
   EVENT_SCROLL_PRESS,
+  EVENT_SCROLL_CLOCKWISE,
+  EVENT_SCROLL_ANTICLOCKWISE,
 } Event_t;
 
 typedef struct {
@@ -59,30 +64,6 @@ typedef struct {
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
-/* Top Level / Home States */
-#define MAIN_MENU 0
-
-/* Music Substates */
-#define MUSIC_MENU 1
-// #define MUSIC_HOME_STATE 4
-// #define MUSIC_PLAYLIST_STATE 5
-// #define MUSIC_ALBUM_STATE    6
-// #define MUSIC_ALLSONGS_STATE 7
-// #define MUSIC_ARTIST_STATE 14
-
-/* Timer Substates */
-#define TIMER_MENU 2
-#define PRESET_TIMERS_MENU   20
-#define SET_TIMER_MENU 21
-
-/* Alarm Substates */
-#define ALARM_MENU 3
-#define PRESET_ALARM_MENU   30
-#define SET_ALARM_MENU      31
-
-/* Settings Substates*/
-#define SETTINGS_MENU 4
 
 //Debugging defines
 #define LD3_ON  (HAL_GPIO_WritePin(LD3_GPIO_Port,LD3_Pin, GPIO_PIN_SET))
@@ -124,6 +105,7 @@ DMA_HandleTypeDef hdma_sdmmc1_rx;
 DMA_HandleTypeDef hdma_sdmmc1_tx;
 
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
 /*
@@ -151,11 +133,15 @@ uint8_t scroll_register;
 #define CLOCKWISE_SCROLL_BIT 0
 #define ANTICLOCKWISE_SCROLL_BIT 2
 bool scroll_key_pressed = false;
-bool scroll_key_held = false;
+volatile bool scroll_key_held = false;
 
 static uint32_t phase = 0;
 //Global Variables
 uint8_t music_volume = 0;
+uint8_t timer_length=0;
+uint8_t time_elapsed=0;
+
+volatile bool scroll_key_release_pending = false;
 
 static bool test_refresh = false;
 static uint8_t draw_state = 0;
@@ -166,7 +152,7 @@ uint8_t current_state = 0;
 uint8_t next_state = 0;
 bool down_button_last = false;
 
-
+      bool setting_timer = false;
 // SDMMC
 FATFS MyFatFS; 
 FIL MyFile;    
@@ -217,14 +203,14 @@ GPIO_PinState s1, s2 = GPIO_PIN_RESET;
   menu_screen timer_menu[] = {
     {"Back", STATE_HOME},
     {"Preset Timers", STATE_HOME},
-    {"Set Timer", STATE_HOME}
+    {"Set Timer", STATE_TIMER_SET}
   };
 
-  // menu_screen timer_preset_menu[] = {
-  //   {"Back", MAIN_MENU},
-  //   {"5 mins", MAIN_MENU},
-  //   {"10 mins",MAIN_MENU}
-  // };
+  menu_screen timer_preset_menu[] = {
+    {"Back", STATE_HOME},
+    {"5 mins", STATE_HOME},
+    {"10 mins",STATE_HOME}
+  };
 
   // menu_screen alarm_menu[] = {
   //   {"Back", MAIN_MENU},
@@ -246,6 +232,7 @@ static void MX_SDMMC1_SD_Init(void);
 static void MX_SAI1_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_CRC_Init(void);
+static void MX_TIM2_Init(void);
 void MX_USB_HOST_Process(void);
 
 /* USER CODE BEGIN PFP */
@@ -268,40 +255,42 @@ void MX_USB_HOST_Process(void);
 // void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
 //   timer_ready = 1;
 // 	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_7);
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+    if (htim->Instance == TIM2) {
+        time_elapsed++;
+        if ((time_elapsed / 60) >= timer_length) {
+            HAL_TIM_Base_Stop_IT(&htim2);
+            currentState = STATE_TIMER_DONE;
+            refresh_needed = 1;
+        }
+    }
+}
 
 // }
 
 void Check_Scroll_Key_Hold() {
-  if ((input_register & (1 << SCROLL_KEY_BIT)) && !scroll_key_held) {
-    __HAL_TIM_SET_COUNTER(&htim1, 0);
-    HAL_TIM_Base_Start(&htim1);
-    scroll_key_held = true;
-  }
-  if (!(input_register & (1 << SCROLL_KEY_BIT)) && scroll_key_held) {
-    button_hold_time = __HAL_TIM_GET_COUNTER(&htim1);
-    HAL_TIM_Base_Stop(&htim1);
-    if (button_hold_time >= SCROLL_KEY_HOLD_TIME) {
-      input_event = EVENT_SCROLL_HOLD;
+    if (scroll_key_release_pending) {
+        scroll_key_release_pending = false;
+        button_hold_time = __HAL_TIM_GET_COUNTER(&htim1);
+        HAL_TIM_Base_Stop(&htim1);
+        scroll_key_held = false;
+        if (button_hold_time >= SCROLL_KEY_HOLD_TIME) {
+            input_event = EVENT_SCROLL_HOLD;
+        } else {
+            input_event = EVENT_SCROLL_PRESS;
+        }
     }
-    else {
-      input_event = EVENT_SCROLL_PRESS;
-    }
-    scroll_key_held = false;
-  }
 }
 
 void Check_Scroll() {
   if (scroll_register & (1 << SCROLL_FLAG_BIT)) {
     if (scroll_register & (1 << CLOCKWISE_SCROLL_BIT)) {
-      option++;
+      input_event = EVENT_SCROLL_CLOCKWISE;
     }
     if (scroll_register & (1 << ANTICLOCKWISE_SCROLL_BIT)) {
-      option--;
+      input_event = EVENT_SCROLL_ANTICLOCKWISE;
     }
     scroll_register &= ~(0b00000111); // Clear scroll direction bits and flag
-    if (option > 4) option = 1;
-    if (option < 1) option = 4;
-    refresh_needed = 1;
   }
 }
 
@@ -317,7 +306,8 @@ void Check_Music_Buttons() {
   }
 }
 
-void UI_State_Machine(Event_t input) {
+void UI_State_Machine() {
+  if (input_event == NONE) return;
   switch (currentState) {
     case STATE_HOME:
       if (input_event == EVENT_SCROLL_PRESS) {
@@ -325,6 +315,8 @@ void UI_State_Machine(Event_t input) {
         refresh_needed=1;
         option=1;
       }
+      if (input_event == EVENT_SCROLL_CLOCKWISE) {option++;refresh_needed=1;}
+      if (input_event == EVENT_SCROLL_ANTICLOCKWISE) {option--;refresh_needed=1;}
       break;
     case STATE_TIMER:
       if (input_event == EVENT_SCROLL_PRESS) {
@@ -332,19 +324,80 @@ void UI_State_Machine(Event_t input) {
         refresh_needed=1;
         option=1;
       }
+      if (input_event == EVENT_SCROLL_CLOCKWISE) {option++;refresh_needed=1;}
+      if (input_event == EVENT_SCROLL_ANTICLOCKWISE) {option--;refresh_needed=1;}
+      if (input_event == EVENT_SCROLL_HOLD) {
+        currentState = STATE_HOME;
+        refresh_needed=1;
+        option=1;
+      }
       break;
+    case STATE_TIMER_SET:
+      if (input_event == EVENT_SCROLL_CLOCKWISE && !setting_timer) {option++;refresh_needed=1;}
+      else if (input_event == EVENT_SCROLL_ANTICLOCKWISE && !setting_timer) {option--;refresh_needed=1;}
+
+      else if (option==1 && input_event == EVENT_SCROLL_PRESS) {currentState=STATE_HOME;refresh_needed=1;option=1;}
+
+      else if (option == 2 && !setting_timer && input_event == EVENT_SCROLL_PRESS) {
+        setting_timer = true;
+      refresh_needed=1;
+      }
+      else if (option == 2 && setting_timer && input_event == EVENT_SCROLL_CLOCKWISE) {
+        timer_length++;
+        refresh_needed=1;
+      }
+      else if (option == 2 && setting_timer && input_event == EVENT_SCROLL_ANTICLOCKWISE) {
+        timer_length--;        
+        refresh_needed=1;
+      }
+      else if (option == 2 && setting_timer && input_event == EVENT_SCROLL_PRESS) {
+        setting_timer = false;
+        refresh_needed=1;
+      }
+      else if (option == 3 && input_event == EVENT_SCROLL_PRESS) {
+        HAL_TIM_Base_Start_IT(&htim2);
+        currentState = STATE_HOME;
+        refresh_needed = 1;
+      }
+
+      else if (input_event == EVENT_SCROLL_HOLD) {
+        
+        currentState = STATE_HOME;
+            setting_timer = false;  // add this
+        refresh_needed=1;
+        option=1;
+      }
+      break;
+    case STATE_TIMER_DONE:
+      if (input_event == EVENT_SCROLL_PRESS) {
+        currentState = STATE_HOME;
+        refresh_needed=1;
+        option=1;
+      }
     default:
       break;
   }
   input_event = NONE;
+  if (option > 4) option = 1;
+  if (option < 1) option = 4;
   if (refresh_needed) {
     refresh_needed=0;
     switch (currentState) {
-      case STATE_HOME: DisplayOptions(option,main_menu[0].name, main_menu[1].name, main_menu[2].name, main_menu[3].name); break;
-      case STATE_TIMER: DisplayOptionsTwo(option, timer_menu[0].name, timer_menu[1].name); break;
+      case STATE_HOME: LD3_OFF; DisplayOptions(option,main_menu[0].name, main_menu[1].name, main_menu[2].name, main_menu[3].name); break;
+      case STATE_TIMER: DisplayOptionsThree(option, timer_menu[0].name, timer_menu[1].name, timer_menu[2].name); break;
+      case STATE_TIMER_SET: timerSetUI(option, timer_length, setting_timer); break;
+      case STATE_TIMER_DONE: LD3_ON; DrawTextToScreen("Timer Done"); break;
       default: break;
     } 
   }
+}
+
+void timerCheck() {
+  if (currentState == STATE_TIMER_DONE && refresh_needed) {
+        refresh_needed = 0;
+        LD3_ON;
+        DrawTextToScreen("Timer Done");
+    }
 }
 
 /* Testing and Debugging */
@@ -403,20 +456,18 @@ void Test_Scroll_Key_Hold() {
     test_refresh=true;
     //input_register &= ~(1 << SCROLL_KEY_BIT); // Zero this bit
     if (button_hold_time >= SCROLL_KEY_HOLD_TIME) {
-      scroll_button_hold = true; 
-      scroll_key_pressed = false;
+input_event = EVENT_SCROLL_HOLD;
     }
     else {
-      scroll_key_pressed = true;
-      scroll_button_hold = false;
+input_event = EVENT_SCROLL_PRESS;
     }
     // input_register &= ~(1 << SCROLL_KEY_BIT);
     scroll_key_held = false;
   }
   
-  if (scroll_button_hold) {
+  if (input_event == EVENT_SCROLL_HOLD) {
     LD2_ON; LD3_OFF;
-  } else if (scroll_key_pressed) {
+  } else if (input_event == EVENT_SCROLL_PRESS) {
     LD3_ON; LD2_OFF;
   }
 
@@ -548,6 +599,7 @@ int main(void)
   MX_SAI1_Init();
   MX_ADC1_Init();
   MX_CRC_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
 
 /*
@@ -592,11 +644,12 @@ int main(void)
     //if (input_register & (1 << SCROLL_KEY_BIT)) {LD2_ON;} else {LD2_OFF;}
 
     /*Controller - View Inputs and change variables accordingly*/
-    Check_Scroll_Key_Hold();
     Check_Scroll();
     Check_Volume();
     Check_Music_Buttons();
-    UI_State_Machine(input_event);
+    Check_Scroll_Key_Hold();
+    UI_State_Machine();
+    timerCheck();
     /* Draw to Screen */
     /* USER CODE END WHILE */
     MX_USB_HOST_Process();
@@ -987,6 +1040,51 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 14200;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 999;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -1167,14 +1265,16 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   }
 
   if (GPIO_Pin == BUTTON_SCROLL_Pin) {
-        if (HAL_GPIO_ReadPin(BUTTON_SCROLL_GPIO_Port, BUTTON_SCROLL_Pin) == GPIO_PIN_SET) {
-            // --- PRESS (active low, falling edge) ---
-            input_register |= (1 << SCROLL_KEY_BIT);
-        } else {
-            // --- RELEASE (rising edge) ---
-            input_register &= ~(1 << SCROLL_KEY_BIT);
-        }
+    if (HAL_GPIO_ReadPin(BUTTON_SCROLL_GPIO_Port, BUTTON_SCROLL_Pin) == GPIO_PIN_SET) {
+        input_register |= (1 << SCROLL_KEY_BIT);
+        __HAL_TIM_SET_COUNTER(&htim1, 0);
+        HAL_TIM_Base_Start(&htim1);
+        scroll_key_held = true;
+    } else {
+        input_register &= ~(1 << SCROLL_KEY_BIT);
+        scroll_key_release_pending = true;  // flag the release
     }
+  }
 }
 /* USER CODE END 4 */
 
