@@ -1,0 +1,8 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/Users/Deven/Documents/Projects/Firmware/device-stm32/Firmware/build-tests/cmake_install.cmake",
+		"C:/Users/Deven/Documents/Projects/Firmware/device-stm32/Firmware/build-tests/tests/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

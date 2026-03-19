@@ -28,6 +28,8 @@
 #include "ssd1306_tests.h"
 #include "ssd1306_fonts.h"
 #include "display.h"
+#include "audio_control.h"
+#include "input.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -118,6 +120,15 @@ TIM_HandleTypeDef htim2;
                                                      
                                                                   
 */
+//Volume Flag
+volatile bool g_vol_up_pressed = false;
+volatile bool g_vol_down_pressed = false;
+
+// Volume Buttons
+ButtonState vol_up_btn;
+ButtonState vol_down_btn;
+
+
 Event_t input_event;
 volatile State_t currentState = STATE_HOME;
 
@@ -137,7 +148,6 @@ volatile bool scroll_key_held = false;
 
 static uint32_t phase = 0;
 //Global Variables
-uint8_t music_volume = 0;
 uint8_t timer_length=0;
 uint8_t time_elapsed=0;
 
@@ -266,8 +276,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
     }
 }
 
-// }
-
 void Check_Scroll_Key_Hold() {
     if (scroll_key_release_pending) {
         scroll_key_release_pending = false;
@@ -294,10 +302,10 @@ void Check_Scroll() {
   }
 }
 
-void Check_Volume() {
-  if (music_volume > 100) music_volume = 100;
-  else if (music_volume < 0) music_volume = 0;
-}
+// void Check_Volume() {
+//   if (music_volume > 100) music_volume = 100;
+//   else if (music_volume < 0) music_volume = 0;
+// }
 
 void Check_Music_Buttons() {
   if ((input_register & (1 << PLAY_PRESSED)) || (input_register & (1 << SKIP_PRESSED)) || (input_register & (1 << REWIND_PRESSED))) {
@@ -305,6 +313,7 @@ void Check_Music_Buttons() {
     DrawTextToScreen("would play song");
   }
 }
+// }
 
 void UI_State_Machine() {
   if (input_event == NONE) return;
@@ -618,7 +627,8 @@ int main(void)
   // Display Initialisation
   ssd1306_Init();
   //TestSound();
-  //TestSD();
+  Input_Init(&vol_up_btn);
+Input_Init(&vol_down_btn);
   
   /* USER CODE END 2 */
 
@@ -645,7 +655,16 @@ int main(void)
 
     /*Controller - View Inputs and change variables accordingly*/
     Check_Scroll();
-    Check_Volume();
+    
+    if (g_vol_up_pressed) {
+      g_vol_up_pressed = false;
+      ButtonEvent event = Input_Update(&vol_up_btn, true, HAL_GetTick());
+      if (event == BUTTON_EVENT_SHORT_PRESS)
+          AudioControl_AdjustVolume(+5);
+      else if (event == BUTTON_EVENT_LONG_PRESS)
+          AudioControl_AdjustVolume(+20);
+    }
+
     Check_Music_Buttons();
     Check_Scroll_Key_Hold();
     UI_State_Machine();
@@ -1255,13 +1274,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     scroll_register |= (1 << SCROLL_FLAG_BIT);
     scroll_register |= (HAL_GPIO_ReadPin(SCROLL_S2_GPIO_Port, SCROLL_S2_Pin)) ? (1 << ANTICLOCKWISE_SCROLL_BIT) : (1 << CLOCKWISE_SCROLL_BIT);
   }
-
   if (GPIO_Pin == BUTTON_VOL_UP_Pin) {
-    music_volume++;
+    g_vol_up_pressed = true;
   }
-
   if (GPIO_Pin == BUTTON_VOL_DOWN_Pin) {
-    music_volume--;
+      g_vol_down_pressed = true;
   }
 
   if (GPIO_Pin == BUTTON_SCROLL_Pin) {
