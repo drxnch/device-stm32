@@ -51,7 +51,7 @@ enable_language(C ASM)
 
 if(NOT DEFINED STM32_TARGET_BUILD)
     enable_testing()
-    add_subdirectory(tests)
+    add_subdirectory(Tests)
 else()
     add_subdirectory(cmake/stm32cubemx)
     add_compile_options(-mcpu=cortex-m4 -mthumb -mfloat-abi=softfp -mfpu=fpv4-sp-d16)
