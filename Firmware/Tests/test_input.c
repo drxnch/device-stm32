@@ -16,6 +16,7 @@ void test_input_init_set_default_state(void) {
 
 void test_input_update_set_button_event_short_press(void) {
     ButtonState btn;
+    Input_Init(&btn);
     // Press the button
     Input_Update(&btn, true, 0);
     // Wait past debounce threshold
@@ -29,6 +30,8 @@ void test_input_update_set_button_event_short_press(void) {
 
 void test_input_update_set_button_event_long_press(void) {
     ButtonState btn;
+    Input_Init(&btn);
+
 
     Input_Update(&btn, true,0);
     Input_Update(&btn, true, 25);
