@@ -1,1 +1,0 @@
- -lstm32cubemx "C:/Users/Deven/Documents/Projects/Firmware/device-stm32/Firmware/Core/Libs/lib_mp3decoder_cortex_m4_v2.2.0.a" -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32 
