@@ -53,9 +53,6 @@ if(NOT DEFINED STM32_TARGET_BUILD)
     enable_testing()
     add_subdirectory(Tests)
 else()
-    add_subdirectory(cmake/stm32cubemx)
-    add_compile_options(-mcpu=cortex-m4 -mthumb -mfloat-abi=softfp -mfpu=fpv4-sp-d16)
-    add_link_options(-mcpu=cortex-m4 -mthumb -mfloat-abi=softfp -mfpu=fpv4-sp-d16)
     add_executable(${CMAKE_PROJECT_NAME})
     target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE)
     target_sources(${CMAKE_PROJECT_NAME} PRIVATE
@@ -63,6 +60,9 @@ else()
         Core/Src/ssd1306_tests.c
         Core/Src/ssd1306_fonts.c
         Core/Src/display.c
+        Core/Src/input.c              # <-- add this
+        Core/Src/audio_control.c      # <-- add this (check exact filename)
+        Core/Src/music_player.c
     )
     target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         Core/Libs
@@ -71,6 +71,6 @@ else()
     list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
     target_link_libraries(${CMAKE_PROJECT_NAME}
         stm32cubemx
-        "${CMAKE_CURRENT_SOURCE_DIR}/Core/Libs/lib_mp3decoder_cortex_m4_v2.2.0.a"
     )
+    add_subdirectory(cmake/stm32cubemx)
 endif()

@@ -4,7 +4,6 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-        
         {
             "type": "stlinkgdbtarget",
             "request": "launch",
@@ -13,9 +12,10 @@
             "cwd": "${workspaceFolder}",
             "preBuild": "${command:st-stm32-ide-debug-launch.build}",
             "runEntry": "main",
+            "deviceName": "STM32L496ZG",
             "imagesAndSymbols": [
                 {
-                    "imageFileName": "${command:st-stm32-ide-debug-launch.get-projects-binary-from-context1}"
+                    "imageFileName": "${workspaceFolder}/build/Debug/Firmware.elf"
                 }
             ]
         }

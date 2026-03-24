@@ -1,3 +1,5 @@
+#include <stdint.h>
+
 static int8_t music_volume = 50;  // private to this file
 
 void AudioControl_SetVolume(int8_t new_volume) {

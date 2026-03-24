@@ -2,6 +2,7 @@
 #define DISPLAY_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 void DrawHomePage(int8_t scroll);
 void DrawMusicPlayerIcon();

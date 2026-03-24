@@ -19,7 +19,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "fatfs.h"
-#include "stm32l4xx_hal_tim.h"
 #include "usb_host.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -30,6 +29,9 @@
 #include "display.h"
 #include "audio_control.h"
 #include "input.h"
+#include "ff.h"
+// In stm32l4xx_it.c (or sai.c, wherever CubeMX put the SAI IRQ handler)
+#include "music_player.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -118,8 +120,20 @@ TIM_HandleTypeDef htim2;
  | |    | | \ \ _| |_   \  /   / ____ \ | |  | |____      \  / ____ \| | \ \ _| |_ / ____ \| |_) | |____| |____ ____) | 
  |_|    |_|  \_\_____|   \/   /_/    \_\|_|  |______|      \/_/    \_\_|  \_\_____/_/    \_\____/|______|______|_____/ 
                                                      
-                                                                  
+                                                             
 */
+
+// Required when FF_MULTI_PARTITION = 1
+// Maps logical volume 0 to physical drive 0, partition 1
+
+// Add these globals at the top
+volatile uint32_t ping_count = 0;
+volatile uint32_t pong_count = 0;
+volatile uint32_t ping_missed = 0;
+volatile uint32_t pong_missed = 0;
+volatile uint8_t s_fill_ping = 0;
+volatile uint8_t s_fill_pong = 0;
+
 //Volume Flag
 volatile bool g_vol_up_pressed = false;
 volatile bool g_vol_down_pressed = false;
@@ -171,7 +185,7 @@ UINT bw;
 uint32_t byteswritten;
 
 // Audio
-#define AUDIO_BUF_SIZE 4096 
+#define AUDIO_BUF_SIZE 8192 
 #define READBUF_SIZE 4096
 int16_t audio_buffer[AUDIO_BUF_SIZE]; // The main buffer
 uint8_t playing = 0;                   // State flag
@@ -513,28 +527,69 @@ void TestSound(void) {
 }
 
 void TestSD() {
-  UINT bw; // Variable to store how many bytes were actually written
-  res = f_mount(&MyFatFS, (TCHAR const *)SDPath, 1); // res = result
+//   uint8_t detected = BSP_SD_IsDetected();
+// uint8_t bsp = BSP_SD_Init();
+// char buff[32];
+// sprintf(buff, "Det:%d BSP:%d", detected, bsp);
+// DrawTextToScreen(buff);
+// HAL_Delay(3000);
+//   // --- RAW SD DIAGNOSTIC ---
+//     HAL_SD_CardInfoTypeDef cardInfo;
+//     HAL_StatusTypeDef sd_status = HAL_SD_GetCardInfo(&hsd1, &cardInfo);
+//     char buf[40];
+//     sprintf(buf, "SD:%d Blk:%lu", sd_status, cardInfo.BlockNbr);
+//     DrawTextToScreen(buf);
+//     HAL_Delay(3000);
 
-  if (res == FR_OK) {
-    if (res == FR_OK || res == FR_EXIST) {
-      res = f_open(&MyFile, "poo.txt", FA_WRITE | FA_CREATE_ALWAYS);
-      if (res == FR_OK) {
-        f_write(&MyFile, "Gurt: Yo!", 9, &bw);
-        DrawTextToScreen("Gurt:Yo!");
-        f_close(&MyFile);
-        }
-      else {
-        DrawTextToScreen("Open Failure");
-      }
-    }
-    f_mount(NULL, "", 0);
-  }
-  else {
-    char err[20];
-    sprintf(err, "Res Error: %d", res);
-    DrawTextToScreen(err);
-  }
+//     // Read sector 0 (MBR) raw and show first 4 bytes
+//     uint8_t sector[512];
+//     HAL_StatusTypeDef read_status = HAL_SD_ReadBlocks(&hsd1, sector, 0, 1, 1000);
+//     sprintf(buf, "Rd:%d %02X%02X%02X%02X", read_status,
+//             sector[0], sector[1], sector[2], sector[3]);
+//     DrawTextToScreen(buf);
+//     HAL_Delay(3000);
+
+//     // Show the MBR signature bytes (should be 55 AA at offset 510-511)
+//     sprintf(buf, "MBR sig: %02X %02X", sector[510], sector[511]);
+//     DrawTextToScreen(buf);
+//     HAL_Delay(3000);
+//     // --- END DIAGNOSTIC ---
+//  BSP_SD_Init();          // force SD hardware init first
+//     HAL_Delay(100);         // let card settle
+
+static FATFS s_fatfs;
+f_mount(&s_fatfs, "0:", 1);
+DIR dir;
+FILINFO fno;
+f_opendir(&dir, "0:");
+while (f_readdir(&dir, &fno) == FR_OK && fno.fname[0]) {
+    DrawTextToScreen(fno.fname);
+    HAL_Delay(2000);
+}
+f_closedir(&dir);
+
+  // UINT bw; // Variable to store how many bytes were actually written
+  // res = f_mount(&MyFatFS, (TCHAR const *)SDPath, 1); // res = result
+
+  // if (res == FR_OK) {
+  //   if (res == FR_OK || res == FR_EXIST) {
+  //     res = f_open(&MyFile, "poo.txt", FA_WRITE | FA_CREATE_ALWAYS);
+  //     if (res == FR_OK) {
+  //       f_write(&MyFile, "Gurt: Yo!", 9, &bw);
+  //       DrawTextToScreen("Gurt:Yo!");
+  //       f_close(&MyFile);
+  //       }
+  //     else {
+  //       DrawTextToScreen("Open Failure");
+  //     }
+  //   }
+  //   f_mount(NULL, "", 0);
+  // }
+  // else {
+  //   char err[20];
+  //   sprintf(err, "Res Error: %d", res);
+  //   DrawTextToScreen(err);
+  // }
 }
 
 void PlaySong(char song[20]) {
@@ -610,7 +665,6 @@ int main(void)
   MX_CRC_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
-
 /*
   _____ _   _ _____ _______ _____          _      _____  _____         _______  _____  ____  _   _  _____ 
  |_   _| \ | |_   _|__   __|_   _|   /\   | |    |_   _|/ ____|  / \  |__    __|_   _|/ __ \| \ | |/ ____|
@@ -626,9 +680,13 @@ int main(void)
 
   // Display Initialisation
   ssd1306_Init();
+  //HAL_Delay(500);
+  //TestSD();
+  MusicPlayer_Init();
+  MusicPlayer_Play("EQUIL.mp3");
   //TestSound();
-  Input_Init(&vol_up_btn);
-Input_Init(&vol_down_btn);
+  // Input_Init(&vol_up_btn, BUTTON_VOL_UP_GPIO_Port, BUTTON_VOL_UP_Pin);
+  // Input_Init(&vol_down_btn, BUTTON_VOL_DOWN_GPIO_Port, BUTTON_VOL_DOWN_Pin);
   
   /* USER CODE END 2 */
 
@@ -644,6 +702,19 @@ Input_Init(&vol_down_btn);
                                                                        
 */
   while (1) {
+    /* USER CODE - temporary diagnostic */
+    
+    Check_Scroll();
+    MusicPlayer_Process();
+    // 3. DEBUG: Slow down the screen updates significantly
+    // static uint32_t last_print = 0;
+    // if (HAL_GetTick() - last_print > 500) { // Update twice a second, not constantly
+    //     last_print = HAL_GetTick();
+    //     char dbg[32];
+    //     If ping_missed or pong_missed is climbing, SDMMC is too slow
+    //     sprintf(dbg, "P:%lu M:%lu", ping_count, ping_missed);
+    //     DrawTextToScreen(dbg); 
+    // }
 
     /* Debugging Functions */
     //TestInputs();
@@ -654,15 +725,15 @@ Input_Init(&vol_down_btn);
     //if (input_register & (1 << SCROLL_KEY_BIT)) {LD2_ON;} else {LD2_OFF;}
 
     /*Controller - View Inputs and change variables accordingly*/
-    Check_Scroll();
-    
-    if (g_vol_up_pressed) {
-      g_vol_up_pressed = false;
-      ButtonEvent event = Input_Update(&vol_up_btn, true, HAL_GetTick());
-      if (event == BUTTON_EVENT_SHORT_PRESS)
-          AudioControl_AdjustVolume(+5);
-      else if (event == BUTTON_EVENT_LONG_PRESS)
-          AudioControl_AdjustVolume(+20);
+
+
+    if (g_vol_down_pressed) {
+    g_vol_down_pressed = false;
+    ButtonEvent event = Input_Update(&vol_down_btn);
+    if (event == BUTTON_EVENT_SHORT_PRESS)
+        AudioControl_AdjustVolume(-5);
+    else if (event == BUTTON_EVENT_LONG_PRESS)
+        AudioControl_AdjustVolume(-20);
     }
 
     Check_Music_Buttons();
@@ -706,14 +777,14 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.LSEState = RCC_LSE_ON;
   RCC_OscInitStruct.MSIState = RCC_MSI_ON;
   RCC_OscInitStruct.MSICalibrationValue = 0;
-  RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_9;
+  RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
-  RCC_OscInitStruct.PLL.PLLM = 5;
+  RCC_OscInitStruct.PLL.PLLM = 1;
   RCC_OscInitStruct.PLL.PLLN = 71;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
-  RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV6;
+  RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -724,11 +795,11 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV4;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
   {
     Error_Handler();
   }
@@ -748,20 +819,18 @@ void PeriphCommonClock_Config(void)
 
   /** Initializes the peripherals clock
   */
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_SAI1|RCC_PERIPHCLK_USB
-                              |RCC_PERIPHCLK_SDMMC1|RCC_PERIPHCLK_ADC;
-  PeriphClkInit.Sai1ClockSelection = RCC_SAI1CLKSOURCE_PLLSAI1;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USB|RCC_PERIPHCLK_SDMMC1
+                              |RCC_PERIPHCLK_ADC;
   PeriphClkInit.AdcClockSelection = RCC_ADCCLKSOURCE_PLLSAI1;
   PeriphClkInit.UsbClockSelection = RCC_USBCLKSOURCE_PLLSAI1;
   PeriphClkInit.Sdmmc1ClockSelection = RCC_SDMMC1CLKSOURCE_PLLSAI1;
   PeriphClkInit.PLLSAI1.PLLSAI1Source = RCC_PLLSOURCE_MSI;
-  PeriphClkInit.PLLSAI1.PLLSAI1M = 5;
-  PeriphClkInit.PLLSAI1.PLLSAI1N = 20;
+  PeriphClkInit.PLLSAI1.PLLSAI1M = 1;
+  PeriphClkInit.PLLSAI1.PLLSAI1N = 24;
   PeriphClkInit.PLLSAI1.PLLSAI1P = RCC_PLLP_DIV2;
   PeriphClkInit.PLLSAI1.PLLSAI1Q = RCC_PLLQ_DIV2;
   PeriphClkInit.PLLSAI1.PLLSAI1R = RCC_PLLR_DIV2;
-  PeriphClkInit.PLLSAI1.PLLSAI1ClockOut = RCC_PLLSAI1_SAI1CLK|RCC_PLLSAI1_48M2CLK
-                              |RCC_PLLSAI1_ADC1CLK;
+  PeriphClkInit.PLLSAI1.PLLSAI1ClockOut = RCC_PLLSAI1_48M2CLK|RCC_PLLSAI1_ADC1CLK;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
@@ -882,7 +951,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.Timing = 0x00100208;
+  hi2c1.Init.Timing = 0x00701137;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
@@ -960,7 +1029,6 @@ static void MX_SAI1_Init(void)
   /* USER CODE END SAI1_Init 0 */
 
   /* USER CODE BEGIN SAI1_Init 1 */
-
   /* USER CODE END SAI1_Init 1 */
   hsai_BlockA1.Instance = SAI1_Block_A;
   hsai_BlockA1.Init.AudioMode = SAI_MODEMASTER_TX;
@@ -978,7 +1046,11 @@ static void MX_SAI1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN SAI1_Init 2 */
-
+  hsai_BlockA1.SlotInit.FirstBitOffset = 0;
+hsai_BlockA1.SlotInit.SlotSize = SAI_SLOTSIZE_16B; // Force 32-bit slots
+hsai_BlockA1.SlotInit.SlotNumber = 2;
+hsai_BlockA1.SlotInit.SlotActive = SAI_SLOTACTIVE_0 | SAI_SLOTACTIVE_1;
+HAL_SAI_Init(&hsai_BlockA1);
   /* USER CODE END SAI1_Init 2 */
 
 }
@@ -1215,10 +1287,10 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(SCROLL_S2_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI0_IRQn);
 
-  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 1, 0);
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
@@ -1236,17 +1308,19 @@ void HAL_SAI_ErrorCallback(SAI_HandleTypeDef *hsai) {
 }
 
 void HAL_SAI_TxHalfCpltCallback(SAI_HandleTypeDef *hsai) {
-    //LD2_ON;
-    for (int i = 0; i < AUDIO_BUF_SIZE / 2; i++) {
-        ((int16_t*)audio_buffer)[i] = ((phase++ / 50) % 2 == 0) ? 10000 : -10000;
-    }
+  if (hsai->Instance == SAI1_Block_A) {
+  MusicPlayer_SAI_HalfCpltCallback();
+  }  
+    if (s_fill_ping) ping_missed++;  // flag wasn't cleared yet = missed!
+s_fill_ping = 1;
+ping_count++;
 }
 
 void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai) {
-    //LD2_OFF;
-    for (int i = AUDIO_BUF_SIZE / 2; i < AUDIO_BUF_SIZE; i++) {
-        ((int16_t*)audio_buffer)[i] = ((phase++ / 50) % 2 == 0) ? 10000 : -10000;
-    }
+      if (hsai->Instance == SAI1_Block_A) {MusicPlayer_SAI_CpltCallback();}
+    if (s_fill_pong) pong_missed++;  // flag wasn't cleared yet = missed!
+s_fill_pong = 1;
+pong_count++;
 }
 
 // /* This fills the FIRST half (Index 0 to BUF_SIZE/2 - 1) */
