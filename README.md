@@ -93,7 +93,8 @@ Known issues and limitations are tracked via the GitHub Issues tab for this repo
    - Expected vs. actual behaviour.
    - Hardware revision and firmware version if applicable.
 
-There are currently no critical known issues. Minor limitations may be documented inline in the source code with a `// TODO:` or `// FIXME:` comment.
+At current, the music is somewhat audible but jittery.
+Minor limitations may be documented inline in the source code with a `// TODO:` or `// FIXME:` comment.
 
 ## Maintenance
 
