@@ -192,7 +192,7 @@ void MusicPlayer_Init(void)
 int MusicPlayer_Play(const char *path)
 {
     /* Stop anything currently playing */
-    MusicPlayer_Stop();
+    //MusicPlayer_Stop();
 
     static FATFS s_fatfs;
     FRESULT mres = f_mount(&s_fatfs, "0:", 1);

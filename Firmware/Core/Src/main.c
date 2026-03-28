@@ -526,6 +526,39 @@ void TestSound(void) {
     started = 1;
 }
 
+void TestMusicWav() {
+  res = f_mount(&MyFatFS, (TCHAR const*)SDPath, 1);
+if (res == FR_OK) {
+    // 2. Open the audio file
+    res = f_open(&MyFile, "EQ.wav", FA_READ); 
+    
+    if (res == FR_OK) {
+        // 3. Skip WAV header (44 bytes)
+        f_lseek(&MyFile, 44);
+        
+        // 4. Initial Buffer Fill (Read bytes, but fill half the samples)
+        // We read AUDIO_BUF_SIZE * 2 because each sample is 2 bytes (uint16_t)
+        res = f_read(&MyFile, audio_buffer, AUDIO_BUF_SIZE * 2, &bytes_read);
+        
+        if (res == FR_OK && bytes_read > 0) {
+            ssd1306_SetCursor(2, 0);
+            ssd1306_WriteString("Playing Music...", Font_7x10, White);
+            ssd1306_UpdateScreen();
+
+            // 5. Start SAI DMA (SAI expects number of samples, not bytes)
+            HAL_SAI_Transmit_DMA(&hsai_BlockA1, (uint8_t *)audio_buffer, AUDIO_BUF_SIZE);
+            playing = 1;
+        }
+    } else {
+        // Show error if file not found
+        char errBuf[20];
+        sprintf(errBuf, "Open Error: %d", res);
+        ssd1306_SetCursor(2, 30);
+        ssd1306_WriteString(errBuf, Font_7x10, White);
+        ssd1306_UpdateScreen();
+    }
+}
+}
 void TestSD() {
 //   uint8_t detected = BSP_SD_IsDetected();
 // uint8_t bsp = BSP_SD_Init();
@@ -682,9 +715,9 @@ int main(void)
   ssd1306_Init();
   //HAL_Delay(500);
   //TestSD();
-  MusicPlayer_Init();
-  MusicPlayer_Play("EQUIL.mp3");
+  //MusicPlayer_Init(); MusicPlayer_Play("EQUIL.mp3");
   //TestSound();
+  TestMusicWav();
   // Input_Init(&vol_up_btn, BUTTON_VOL_UP_GPIO_Port, BUTTON_VOL_UP_Pin);
   // Input_Init(&vol_down_btn, BUTTON_VOL_DOWN_GPIO_Port, BUTTON_VOL_DOWN_Pin);
   
@@ -1307,40 +1340,46 @@ void HAL_SAI_ErrorCallback(SAI_HandleTypeDef *hsai) {
     LD3_ON; // If this lights, DMA is faulting
 }
 
-void HAL_SAI_TxHalfCpltCallback(SAI_HandleTypeDef *hsai) {
-  if (hsai->Instance == SAI1_Block_A) {
-  MusicPlayer_SAI_HalfCpltCallback();
-  }  
-    if (s_fill_ping) ping_missed++;  // flag wasn't cleared yet = missed!
-s_fill_ping = 1;
-ping_count++;
-}
-
-void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai) {
-      if (hsai->Instance == SAI1_Block_A) {MusicPlayer_SAI_CpltCallback();}
-    if (s_fill_pong) pong_missed++;  // flag wasn't cleared yet = missed!
-s_fill_pong = 1;
-pong_count++;
-}
-
-// /* This fills the FIRST half (Index 0 to BUF_SIZE/2 - 1) */
 // void HAL_SAI_TxHalfCpltCallback(SAI_HandleTypeDef *hsai) {
-//     // We read (Half the samples) * (2 bytes per sample)
-//     f_read(&MyFile, &audio_buffer[0], AUDIO_BUF_SIZE, &bytes_read);
+//   if (hsai->Instance == SAI1_Block_A) {
+//   MusicPlayer_SAI_HalfCpltCallback();
+//   }  
+//     if (s_fill_ping) ping_missed++;  // flag wasn't cleared yet = missed!
+// s_fill_ping = 1;
+// ping_count++;
 // }
 
-// /* This fills the SECOND half (Index BUF_SIZE/2 to BUF_SIZE - 1) */
 // void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai) {
-//     // We read starting at the middle index
-//     f_read(&MyFile, &audio_buffer[AUDIO_BUF_SIZE/2], AUDIO_BUF_SIZE, &bytes_read);
-    
-//     // Check if the amount read is less than a half-buffer
-//     if (bytes_read < AUDIO_BUF_SIZE) {
-//         HAL_SAI_DMAStop(&hsai_BlockA1);
-//         f_close(&MyFile);
-//         playing = 0;
-//     }
+//       if (hsai->Instance == SAI1_Block_A) {MusicPlayer_SAI_CpltCallback();}
+//     if (s_fill_pong) pong_missed++;  // flag wasn't cleared yet = missed!
+// s_fill_pong = 1;
+// pong_count++;
 // }
+
+// This handles the "Ping" (First Half)
+void HAL_SAI_TxHalfCpltCallback(SAI_HandleTypeDef *hsai) {
+    UINT br;
+    // Fill the first half of the buffer (index 0 to 4095)
+    // Size is (AUDIO_BUF_SIZE / 2) * 2 bytes because each sample is 16-bit
+    f_read(&MyFile, &audio_buffer[0], AUDIO_BUF_SIZE, &br);
+    
+    if (br < AUDIO_BUF_SIZE) {
+        // End of file reached: Close or loop
+        f_lseek(&MyFile, 44); 
+    }
+}
+
+// This handles the "Pong" (Second Half)
+void HAL_SAI_TxCpltCallback(SAI_HandleTypeDef *hsai) {
+    UINT br;
+    // Fill the second half of the buffer (index 4096 to 8191)
+    f_read(&MyFile, &audio_buffer[AUDIO_BUF_SIZE / 2], AUDIO_BUF_SIZE, &br);
+    
+    if (br < AUDIO_BUF_SIZE) {
+        // End of file reached: Close or loop
+        f_lseek(&MyFile, 44);
+    }
+}
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {

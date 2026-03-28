@@ -23,7 +23,7 @@ extern SAI_HandleTypeDef hsai_BlockA1;   // <-- change to match yours
 
 /* FATFS read buffer size — must be large enough to hold ~10 MP3 frames.
  * 16KB is the recommended minimum from the minimp3 docs. */
-#define MUSIC_READ_BUF_SIZE     (64 * 1024)
+#define MUSIC_READ_BUF_SIZE     (16 * 1024)
 
 /* DMA audio buffer: two halves (ping + pong).
  * Each half holds one decoded MP3 frame worth of samples.
