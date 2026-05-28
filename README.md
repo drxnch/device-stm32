@@ -2,7 +2,11 @@
 
 ## Purpose / Introduction
 
-The purpose of this device is to create a simple STM32 device that is capable of running a timer and playing music.
+The purpose of this device is to create a simple STM32 keyring device that contains 3 primary functions:
+- Music Player
+- Timer
+- Alarm
+
 
 ## Installation
 
@@ -24,7 +28,7 @@ These are the steps required to replicate the environment used by myself:
 
 Once the firmware is flashed and the device is powered on, it will initialise automatically. 
 
-The UI Pages Follow the following Structure:
+The UI has been designed to be intuitively navigable, as follows:
 
 ```
 device-
@@ -37,18 +41,22 @@ device-
     ├── Timer
     │   ├── Preset Timers
     │   └── Set Timer
+    ├── Alarm
+    │   ├── Preset Alarms
+    │   └── Set Alarms
     └── Settings
         ├── Brightness
-        └── Modes
+        └── Battery Saver Mode
+
 ```
 
 ### Music Playback
 
-Music playback is triggered once the timer reaches its target, or can be activated independently depending on configuration.
+Music playback can be started by simply pressing the play button, or by selecting a song to play from the 'Music' application.
 
-### Countdown/Timer Functions
+### Countdown/Timer and Alarm Functions
 
-The timer can be started, stopped, and reset using the designated input method (e.g. onboard button). 
+The Timer/Alarm application can be started, stopped, and reset using the designated input method (e.g. onboard button). 
 
 ### Communication
 
