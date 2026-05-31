@@ -118,6 +118,12 @@ void Error_Handler(void);
 
 /* USER CODE BEGIN Private defines */
 
+//Debugging defines
+#define LD3_ON  (HAL_GPIO_WritePin(LD3_GPIO_Port,LD3_Pin, GPIO_PIN_SET))
+#define LD3_OFF  (HAL_GPIO_WritePin(LD3_GPIO_Port,LD3_Pin, GPIO_PIN_RESET))
+#define LD2_ON  (HAL_GPIO_WritePin(LD2_GPIO_Port,LD2_Pin, GPIO_PIN_SET))
+#define LD2_OFF  (HAL_GPIO_WritePin(LD2_GPIO_Port,LD2_Pin, GPIO_PIN_RESET))
+
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

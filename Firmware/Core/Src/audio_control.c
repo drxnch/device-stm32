@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdbool.h>
 
 static int8_t music_volume = 50;  // private to this file
 

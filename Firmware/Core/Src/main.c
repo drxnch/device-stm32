@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "cmsis_os.h"
 #include "fatfs.h"
 #include "usb_host.h"
 
@@ -30,7 +31,6 @@
 #include "audio_control.h"
 #include "input.h"
 #include "ff.h"
-// In stm32l4xx_it.c (or sai.c, wherever CubeMX put the SAI IRQ handler)
 #include "music_player.h"
 
 #include <stdint.h>
@@ -45,12 +45,6 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
-//Debugging defines
-#define LD3_ON  (HAL_GPIO_WritePin(LD3_GPIO_Port,LD3_Pin, GPIO_PIN_SET))
-#define LD3_OFF  (HAL_GPIO_WritePin(LD3_GPIO_Port,LD3_Pin, GPIO_PIN_RESET))
-#define LD2_ON  (HAL_GPIO_WritePin(LD2_GPIO_Port,LD2_Pin, GPIO_PIN_SET))
-#define LD2_OFF  (HAL_GPIO_WritePin(LD2_GPIO_Port,LD2_Pin, GPIO_PIN_RESET))
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -77,6 +71,13 @@ DMA_HandleTypeDef hdma_sdmmc1_tx;
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 
+/* Definitions for defaultTask */
+osThreadId_t defaultTaskHandle;
+const osThreadAttr_t defaultTask_attributes = {
+  .name = "defaultTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 /* USER CODE BEGIN PV */
 /*
   _____  _____  _______      __       _______ ______   __      __     _____  _____          ____  _      ______  _____ 
@@ -89,49 +90,7 @@ TIM_HandleTypeDef htim2;
                                                              
 */
 
-/* GPIO Inputs */
-
-static uint32_t phase = 0;
-//Global Variables
-uint8_t timer_length=0;
-uint8_t time_elapsed=0;
-
-volatile bool scroll_key_release_pending = false;
-
-static bool test_refresh = false;
-static uint8_t draw_state = 0;
-static uint32_t button_hold_time = 0;
-//Initialisation Code
-uint8_t last_state = 0;
-uint8_t current_state = 0;
-uint8_t next_state = 0;
-bool down_button_last = false;
-
-      bool setting_timer = false;
-// SDMMC
-FATFS MyFatFS; 
-FIL MyFile;    
-FRESULT res; 
-UINT bw;  
-uint32_t byteswritten;
-
-// Audio
-#define AUDIO_BUF_SIZE 8192 
-#define READBUF_SIZE 4096
-int16_t audio_buffer[AUDIO_BUF_SIZE]; // The main buffer
-uint8_t playing = 0;                   // State flag
-UINT bytes_read;                       // To track SD card progress
-uint8_t readBuf[READBUF_SIZE]; // Buffer for encoded MP3 data
-int16_t outBuf[2 * 1152];      // Buffer for decoded PCM data
-uint32_t adc_buffer[1];
-uint8_t timer_ready = 0;
-
-
-uint8_t previous_volume = 0;
-volatile int8_t scroll_value = 0;
-int8_t previous_scroll_value = 0;
-uint8_t refresh_needed = 0;
-bool scroll_button_hold =false;
+// PV goes here #todo
 
 /* USER CODE END PV */
 
@@ -148,10 +107,13 @@ static void MX_SAI1_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_CRC_Init(void);
 static void MX_TIM2_Init(void);
-void MX_USB_HOST_Process(void);
+void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
-
+static void AlarmInit(void);
+static void DisplayInit(void);
+static void AudioInit(void);
+static void GuiInit(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -166,6 +128,21 @@ void MX_USB_HOST_Process(void);
                                                                                    
                               
 */
+
+static void AlarmInit(void) {
+}
+
+static void DisplayInit(void) {
+  ssd1306_Init();
+}
+
+static void AudioInit() {
+
+}
+
+static void 
+
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
   if (htim->Instance == TIM2) {
       time_elapsed++;
@@ -212,7 +189,6 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_LPUART1_UART_Init();
-  MX_USB_HOST_Init();
   MX_TIM1_Init();
   MX_I2C1_Init();
   MX_SDMMC1_SD_Init();
@@ -233,19 +209,46 @@ int main(void)
 */
   
 // Initialisations
-  //HAL_TIM_Base_Start_IT(&htim1);
 
-  // Display Initialisation
-  ssd1306_Init();
-  //HAL_Delay(500);
-  //TestSD();
-  //MusicPlayer_Init(); MusicPlayer_Play("EQUIL.mp3");
-  //TestSound();
-  TestMusicWav();
-  // Input_Init(&vol_up_btn, BUTTON_VOL_UP_GPIO_Port, BUTTON_VOL_UP_Pin);
-  // Input_Init(&vol_down_btn, BUTTON_VOL_DOWN_GPIO_Port, BUTTON_VOL_DOWN_Pin);
+  Display_Init();
   
   /* USER CODE END 2 */
+
+  /* Init scheduler */
+  osKernelInitialize();
+
+  /* USER CODE BEGIN RTOS_MUTEX */
+  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+
+  /* Create the thread(s) */
+  /* creation of defaultTask */
+  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+
+  /* USER CODE BEGIN RTOS_THREADS */
+  /* add threads, ... */
+  /* USER CODE END RTOS_THREADS */
+
+  /* USER CODE BEGIN RTOS_EVENTS */
+  /* add events, ... */
+  /* USER CODE END RTOS_EVENTS */
+
+  /* Start scheduler */
+  osKernelStart();
+
+  /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -261,8 +264,8 @@ int main(void)
   while (1) {
     /* USER CODE - temporary diagnostic */
     
-    Check_Scroll();
-    MusicPlayer_Process();
+    // Check_Scroll();
+    // MusicPlayer_Process();
     // 3. DEBUG: Slow down the screen updates significantly
     // static uint32_t last_print = 0;
     // if (HAL_GetTick() - last_print > 500) { // Update twice a second, not constantly
@@ -284,22 +287,21 @@ int main(void)
     /*Controller - View Inputs and change variables accordingly*/
 
 
-    if (g_vol_down_pressed) {
-    g_vol_down_pressed = false;
-    ButtonEvent event = Input_Update(&vol_down_btn);
-    if (event == BUTTON_EVENT_SHORT_PRESS)
-        AudioControl_AdjustVolume(-5);
-    else if (event == BUTTON_EVENT_LONG_PRESS)
-        AudioControl_AdjustVolume(-20);
-    }
+    // if (g_vol_down_pressed) {
+    // g_vol_down_pressed = false;
+    // ButtonEvent event = Input_Update(&vol_down_btn);
+    // if (event == BUTTON_EVENT_SHORT_PRESS)
+    //     AudioControl_AdjustVolume(-5);
+    // else if (event == BUTTON_EVENT_LONG_PRESS)
+    //     AudioControl_AdjustVolume(-20);
+    // }
 
-    Check_Music_Buttons();
-    Check_Scroll_Key_Hold();
-    UI_State_Machine();
-    timerCheck();
+    // Check_Music_Buttons();
+    // Check_Scroll_Key_Hold();
+    // UI_State_Machine();
+    // timerCheck();
     /* Draw to Screen */
     /* USER CODE END WHILE */
-    MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
   }
@@ -744,16 +746,16 @@ static void MX_DMA_Init(void)
 
   /* DMA interrupt init */
   /* DMA1_Channel1_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
   /* DMA2_Channel1_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA2_Channel1_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(DMA2_Channel1_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA2_Channel1_IRQn);
   /* DMA2_Channel4_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA2_Channel4_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(DMA2_Channel4_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA2_Channel4_IRQn);
   /* DMA2_Channel5_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA2_Channel5_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(DMA2_Channel5_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA2_Channel5_IRQn);
 
 }
@@ -850,7 +852,7 @@ static void MX_GPIO_Init(void)
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -931,6 +933,26 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   }
 }
 /* USER CODE END 4 */
+
+/* USER CODE BEGIN Header_StartDefaultTask */
+/**
+  * @brief  Function implementing the defaultTask thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartDefaultTask */
+void StartDefaultTask(void *argument)
+{
+  /* init code for USB_HOST */
+  MX_USB_HOST_Init();
+  /* USER CODE BEGIN 5 */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END 5 */
+}
 
 /**
   * @brief  This function is executed in case of error occurrence.
